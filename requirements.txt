@@ -1,0 +1,21 @@
+# 01~04 단계 공용 가상환경 하나 (프로젝트 루트의 .venv)
+# torch 는 CPU 버전을 따로 설치:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+pandas
+numpy
+pyarrow                   # parquet 저장 · 읽기
+openpyxl                  # 분석 · 학습 결과 엑셀
+scikit-learn
+lightgbm
+xgboost
+optuna
+joblib
+tqdm
+python-dotenv
+sqlalchemy
+psycopg[binary]
+matplotlib
+koreanize-matplotlib
+pymodbus==3.6.9           # 04 가상 계측기 · 제어기
+paho-mqtt==2.1.0
+jupyter
+ipykernel
