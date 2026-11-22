@@ -9,6 +9,9 @@ import pandas as pd
 
 import config
 
+P95_KW = 1400   # 가동 중 상위 5% 전력 기준 규모 (kW)
+HIST = 60       # 최근 10분 = 60칸
+
 # 요약 특징 (트리·선형 모델 입력)
 TAB_COLS = [
     "elapsed_ratio", "used_kwh", "kw_now", "proj_base", "proj_trend",
@@ -38,14 +41,14 @@ def to_steps(series):
 def load_main_steps():
     folder = os.path.join(config.MACHINE_DIR, config.MAIN_METER)
     path = config.latest_file(folder, config.MAIN_METER, "parquet")
-    df = pd.read_parquet(path, columns=["ts_utc", "P_kW"])
+    df = pd.read_parquet(path, columns=["tmp_timestamp", "P_kW"])
 
-    kw = pd.Series(df["P_kW"].to_numpy(dtype="float64"), index=pd.DatetimeIndex(df["ts_utc"]))
+    kw = pd.Series(df["P_kW"].to_numpy(dtype="float64"), index=pd.DatetimeIndex(df["tmp_timestamp"]))
     kw = kw.clip(lower=0)  # 음수 = 측정 잡음
 
     # 규모 맞추기: 정지 구간(최대의 5% 이하) 제외 후 상위 5%를 P95_KW로
     running = kw[kw > kw.max() * 0.05]
-    scale = config.P95_KW / np.percentile(running, 95)
+    scale = P95_KW / np.percentile(running, 95)
 
     return to_steps(kw * scale), scale, path
 
@@ -76,12 +79,12 @@ def load_db(db_url, since=None):
 #   - 현재 칸(start + k) 직전까지만 사용 (미래 정보 차단)
 def make_point(values, start, k, ws):
     now = start + k
-    if now - config.HIST < 0 or now > len(values):
+    if now - HIST < 0 or now > len(values):
         return None
 
-    hist = values[now - config.HIST:now]   # 최근 10분
+    hist = values[now - HIST:now]   # 최근 10분
     inside = values[start:now]             # 이번 구간 경과분
-    if len(hist) < config.HIST or np.isnan(hist).any() or np.isnan(inside).any():
+    if len(hist) < HIST or np.isnan(hist).any() or np.isnan(inside).any():
         return None
 
     kw_now = float(hist[-1])

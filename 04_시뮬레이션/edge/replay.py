@@ -17,7 +17,7 @@ class Replay:
         df = pd.read_parquet(path)
         has_volt = "V1_V" in df.columns
 
-        index = pd.DatetimeIndex(df["ts_utc"])
+        index = pd.DatetimeIndex(df["tmp_timestamp"])
         kw = pd.Series(df["P_kW"].to_numpy(dtype="float64"), index=index).clip(lower=0)
         running = kw[kw > kw.max() * 0.05]
         self.scale = p95_kw / np.percentile(running, 95)

@@ -7,7 +7,7 @@
 
 ```
 Edge-PDP/
-├── config.py                  모든 경로 · 숫자 설정 · 최신 파일 찾기 · 로그 (여기만 고치면 전체 반영)
+├── config.py                  여러 파일이 같이 쓰는 경로 · 숫자 · 최신 파일 찾기 · 로그 (한 파일만 쓰는 값은 각 파일 위쪽)
 ├── common/                    여러 단계가 같이 쓰는 코드
 │   ├── features.py            10초 평균 · 15분 구간 특징 (학습과 서빙이 같은 함수 사용)
 │   └── models.py              모델 6종 · Optuna 탐색 범위 · 논문 근거
@@ -16,12 +16,12 @@ Edge-PDP/
 │   ├── raw/                   ← HIPE zip 을 여기에 (아래 '데이터 준비' 링크)
 │   └── machines/<기기명>/<기기명>_<생성시간>.parquet (.csv)
 ├── 02_데이터분석/
-│   ├── analyze_data.py        기기별 요약 · 통계 · 이상치 · 누락 · 패턴 → 엑셀 1개
-│   ├── reports/데이터분석_<생성시간>.xlsx
+│   ├── analyze_data.py        기기별 요약 · 통계 · 이상치 · 누락 · 패턴 → 항목별 엑셀 파일
+│   ├── reports/데이터분석_<생성시간>/1.요약.xlsx … 7.장비관계.xlsx
 │   └── notebooks/             탐색용 노트북
 ├── 03_전처리_모델학습/
 │   ├── preprocess.py          특징 생성 · 날짜 기준 train/valid/test 분할
-│   ├── train.py               모델 6개를 하나씩 Optuna 튜닝 · 학습 → valid/test 결과 · 앙상블
+│   ├── train.py               모델 6개 Optuna 튜닝 · 학습 (ML은 --workers 로 병렬) → train/valid/test 평가 · 3개 조합 앙상블
 │   └── outputs/
 │       ├── Train/ · Valid/ · Test/  <분할>_<생성시간>.parquet, <분할>_seq_<생성시간>.npy
 │       ├── 전처리/meta_<생성시간>.json
@@ -55,18 +55,19 @@ python 01_데이터관리/load_data.py                 # 1. zip → 기기별 pa
 python 02_데이터분석/analyze_data.py              # 2. 분석 엑셀
 python 03_전처리_모델학습/preprocess.py           # 3-1. 특징 · 분할
 python 03_전처리_모델학습/train.py --deploy       # 3-2. 학습 · 평가 · 시뮬레이션 모델 반영
+                                                 #      ML 병렬: --workers 2 추가
 ./04_시뮬레이션/run.sh                            # 4. 시뮬레이션 (stop 으로 종료)
 ```
 
-빠르게 확인할 때: `config.py` 의 `MODELS`, `TRIALS` 를 줄여서 실행
+빠르게 확인할 때: `train.py` 위쪽의 `MODELS`, `TRIALS` 를 줄여서 실행
 
 ## 단계별 산출물
 
 | 단계 | 산출물 | 내용 |
 |---|---|---|
-| 1 | `machines/<기기>/…parquet`, `….csv`, `manifest_….csv` | 필요한 컬럼만, 시각은 UTC, 중복 시각 제거 |
-| 2 | `데이터분석_….xlsx` | 요약 · 기술통계 · 이상치 · 누락구간 · 일별수집률 · 시간대패턴 · 장비관계 |
-| 3 | `학습결과_….xlsx` | 요약(개선율) · 전체결과(valid/test) · 경과시간별 MAE · Optuna 기록 · 모델 근거 · 앙상블 전체 |
+| 1 | `machines/<기기>/…parquet`, `….csv` | 필요한 컬럼만, 시각은 UTC, 중복 시각 제거 |
+| 2 | `데이터분석_…/` 폴더 안 엑셀 7개 | 요약 · 기술통계 · 이상치 · 누락구간 · 일별수집률 · 시간대패턴 · 장비관계 |
+| 3 | `학습결과_….xlsx` | 요약(개선율, test F1) · 성과지표(train/valid/test, 과적합 비율) · 학습정보 · 학습곡선(DL loss) · 경과시간별 MAE · Optuna 기록 · 앙상블 전체 · 모델 근거 |
 | 4 | DB `ml.forecast`, `ml.window_eval` | 같은 구간에서 기준 계산식 vs ML 오차 |
 
 ## 모델 (common/models.py)
@@ -87,5 +88,5 @@ python 03_전처리_모델학습/train.py --deploy       # 3-2. 학습 · 평가
 ## 참고
 
 - 분할은 현지 날짜 기준 70 / 15 / 15. HIPE 시험 기간(12월 말)은 크리스마스 연휴라 피크가 거의 없어,
-  피크 지표는 valid 를 함께 본다. 시뮬레이션도 valid 기간부터 재생한다 (`config.REPLAY_SPLIT`).
+  피크 지표는 valid 를 함께 본다. 시뮬레이션도 valid 기간부터 재생한다 (`train.py` 의 `REPLAY_SPLIT`).
 - 비밀번호는 각 폴더의 `.env` (예시는 `.env.example`).

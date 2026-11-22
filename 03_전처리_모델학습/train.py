@@ -1,278 +1,334 @@
 # 모델 튜닝·학습·평가 및 앙상블 선택
 #   입력: 03_전처리_모델학습/outputs/전처리/ 최신 meta, 같은 생성시간의 Train/, Valid/, Test/ 데이터
 #   출력: 03_전처리_모델학습/outputs/학습결과/{생성시간}/
-#         학습결과_{생성시간}.xlsx, models/{모델}_{생성시간}.pkl, ensemble_{생성시간}.pkl
+#         학습결과_{생성시간}.xlsx (시트 1개, 모델별 1행), models/{모델}_{생성시간}.pkl, ensemble_{생성시간}.pkl
 #   실행: python 03_전처리_모델학습/train.py
-#         python 03_전처리_모델학습/train.py --deploy   (기존보다 좋으면 시뮬레이션 모델 교체)
+#         python 03_전처리_모델학습/train.py --deploy      (기존보다 좋으면 시뮬레이션 모델 교체)
+#         python 03_전처리_모델학습/train.py --workers 4   (ML 모델 병렬 수, ML 모델 수보다 크면 모델 수로 맞춤)
 
+import argparse
 import json
 import os
 import shutil
 import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import combinations
-
 import joblib
 import numpy as np
 import optuna
 import pandas as pd
 from tqdm import tqdm
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from common.features import TAB_COLS
-from common.models import PAPERS, SEQ_MODELS, make_model, predict_ensemble, suggest_params
-
+from common.models import MODEL_SPECS, PAPERS, SEED, predict_ensemble
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-deploy = "--deploy" in sys.argv
+
+# 학습 설정 (SEED는 common/models.py와 같은 값)
+TRAIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outputs", "학습결과")
+MODELS = ["ridge", "rf", "xgb", "lgbm", "gru", "cnn"]   # 학습할 모델
+TRIALS = 20                # 모델별 Optuna 시도 횟수 (딥러닝은 1/3)
+TUNE_ROWS = 30000          # 튜닝용 샘플 수
+EARLY_MIN = 8              # 초반 MAE 기준 (분)
+REPLAY_SPLIT = "valid"     # 시뮬레이션 재생 기간 (test는 연휴라 피크가 거의 없음)
+SPLITS = ["train", "valid", "test"]
 
 
-# 평가 지표: MAE, 초반 MAE, 놓친 피크, 헛경보
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--deploy", action="store_true")
+    parser.add_argument("--workers", type=int, default=10)
+    return parser.parse_args()
+
+
+# 전처리 결과 로드 (최신 meta와 같은 생성시간의 Train, Valid, Test)
+def load_data():
+    meta_path = config.latest_file(config.PREP_DIR, "meta", "json")
+    if meta_path is None:
+        print("전처리 결과가 없음. 먼저 python 03_전처리_모델학습/preprocess.py")
+        sys.exit()
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    prep_stamp = meta["stamp"]
+
+    parts = {}   # 분할별 DataFrame
+    data = {}    # 분할별 (요약 특징, 시퀀스, 잔차)
+    for split in SPLITS:
+        folder = config.SPLIT_DIRS[split]
+        df = pd.read_parquet(os.path.join(folder, f"{split}_{prep_stamp}.parquet"))
+        X_seq = np.load(os.path.join(folder, f"{split}_seq_{prep_stamp}.npy"))
+
+        # 로드 확인: 시퀀스 개수(X_seq 첫 번째 숫자)와 parquet 행 수가 같아야 정상
+        print(f"{split}: parquet {len(df)}행, seq {X_seq.shape}")
+        if X_seq.shape[0] != len(df):
+            print(f"  -> {split} 개수가 안 맞음! 전처리 다시 확인")
+            sys.exit()
+
+        parts[split] = df
+        data[split] = (
+            df[TAB_COLS].to_numpy(dtype="float32"),
+            X_seq,
+            df["residual"].to_numpy(dtype="float64"),
+        )
+    return meta, parts, data
+
+
+# 평가 지표 (15분 구간 단위로 피크 판정)
 #   - 놓친 피크: 목표 초과 구간인데 12분까지 경보 없음
 #   - 헛경보: 실제가 목표의 90% 미만인데 경보
+#   - 정확도·정밀도·재현율·F1: 정답 = 실제 평균 >= 목표, 예측 = 12분까지 한 번이라도 예측 >= 목표
 def evaluate(part, pred, target_kw):
     actual = part["actual_kw"].to_numpy()
+    elapsed = part["elapsed_min"].to_numpy()
     err = np.abs(pred - actual)
-    early = part["elapsed_min"].to_numpy() <= config.EARLY_MIN
+    early = elapsed <= EARLY_MIN
 
     frame = pd.DataFrame({
         "window_start": part["window_start"].to_numpy(),
-        "elapsed_min": part["elapsed_min"].to_numpy(),
         "actual": actual,
-        "pred": pred,
+        "alarm": pred >= target_kw,
+        "alarm_12": (pred >= target_kw) & (elapsed <= 12),
     })
-    peaks = 0
-    missed = 0
-    false_alarms = 0
-    for ws, group in frame.groupby("window_start"):
-        window_actual = group["actual"].iloc[0]
-        alarms = group[group["pred"] >= target_kw]
-        if window_actual >= target_kw:
-            peaks += 1
-            if len(alarms[alarms["elapsed_min"] <= 12]) == 0:
-                missed += 1
-        elif window_actual < target_kw * 0.9 and len(alarms) > 0:
-            false_alarms += 1
+    windows = frame.groupby("window_start").agg(
+        actual=("actual", "first"),
+        alarm=("alarm", "any"),
+        alarm_12=("alarm_12", "any"),
+    )
+    is_peak = windows["actual"] >= target_kw
+    caught = windows["alarm_12"]
+
+    tp = int((is_peak & caught).sum())
+    fp = int((~is_peak & caught).sum())
+    fn = int((is_peak & ~caught).sum())
+    tn = int((~is_peak & ~caught).sum())
+
+    precision = tp / (tp + fp) if tp + fp > 0 else 0.0
+    recall = tp / (tp + fn) if tp + fn > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0.0
 
     return {
         "MAE": float(err.mean()),
         "초반 MAE": float(err[early].mean()),
-        "피크 구간": peaks,
-        "놓친 피크": missed,
-        "헛경보": false_alarms,
+        "피크 구간": int(is_peak.sum()),
+        "놓친 피크": fn,
+        "헛경보": int(((windows["actual"] < target_kw * 0.9) & windows["alarm"]).sum()),
+        "정확도": (tp + tn) / len(windows),
+        "정밀도": precision,
+        "재현율": recall,
+        "F1": f1,
     }
 
 
-# 결과표 1행 생성
-def make_row(kind, name, scores):
-    row = {"구분": kind, "모델": name}
-    for split in ["valid", "test"]:
-        for key in scores[split]:
-            row[split + " " + key] = scores[split][key]
+# train/valid/test 전체 평가
+def evaluate_all(parts, preds, target_kw):
+    scores = {}
+    for split in SPLITS:
+        scores[split] = evaluate(parts[split], preds[split], target_kw)
+    return scores
+
+
+# 과적합 점검
+#   - 학습 과적합: 모델의 valid/train 비율 ÷ 기준 계산식의 valid/train 비율 > limit
+#     (기준 계산식은 학습을 안 하므로 그 비율 = 기간 자체의 난이도 차이 → 이걸 빼고 판정)
+#   - valid 과적합: test/valid MAE 비율 > limit
+def overfit_check(scores, base_scores, limit=1.3):
+    valid_train = scores["valid"]["MAE"] / scores["train"]["MAE"]
+    base_ratio = base_scores["valid"]["MAE"] / base_scores["train"]["MAE"]
+    relative = valid_train / base_ratio
+    test_valid = scores["test"]["MAE"] / scores["valid"]["MAE"]
+
+    flags = []
+    if relative > limit:
+        flags.append("학습 과적합")
+    if test_valid > limit:
+        flags.append("valid 과적합")
+    return {
+        "valid/train MAE": valid_train,
+        "기준선 대비 비율": relative,
+        "test/valid MAE": test_valid,
+        "과적합": ", ".join(flags),
+    }
+
+
+# 결과표 1행: 모델 이름, 유형, 성과지표, 에포크, 파라미터, 과적합
+#   - 분류 지표는 valid 위주 (test는 연휴라 피크 구간이 거의 없어 F1이 크게 흔들림 → 피크 구간 수를 같이 표시)
+def make_row(kind, name, scores, base_scores, info=None, weights=""):
+    train = scores["train"]
+    valid = scores["valid"]
+    test = scores["test"]
+    if info is None:
+        info = {}
+
+    row = {
+        "모델": name,
+        "유형": kind,
+        "선택": "",
+        # 회귀 지표
+        "train MAE": train["MAE"],
+        "valid MAE": valid["MAE"],
+        "test MAE": test["MAE"],
+        "valid 개선율(%)": (1 - valid["MAE"] / base_scores["valid"]["MAE"]) * 100,
+        "test 개선율(%)": (1 - test["MAE"] / base_scores["test"]["MAE"]) * 100,
+        "valid 초반 MAE": valid["초반 MAE"],
+        "test 초반 MAE": test["초반 MAE"],
+        # 분류 지표 (15분 구간 단위)
+        "valid 정확도": valid["정확도"],
+        "valid 정밀도": valid["정밀도"],
+        "valid 재현율": valid["재현율"],
+        "valid F1": valid["F1"],
+        "valid 피크 구간": valid["피크 구간"],
+        "valid 놓친 피크": valid["놓친 피크"],
+        "valid 헛경보": valid["헛경보"],
+        "test F1": test["F1"],
+        "test 피크 구간": test["피크 구간"],
+        "test 놓친 피크": test["놓친 피크"],
+        "test 헛경보": test["헛경보"],
+        # 학습 정보
+        "trial 수": info.get("trial 수"),
+        "실행 에포크": info.get("실행 에포크"),
+        "최적 에포크": info.get("최적 에포크"),
+        "학습시간(초)": info.get("학습시간(초)"),
+        "파라미터": info.get("파라미터", ""),
+        "가중치": weights,
+    }
+    row.update(overfit_check(scores, base_scores))
+    row["논문"] = PAPERS.get(name, "")
     return row
 
 
-# 1. 전처리 결과 로드 (최신 meta와 같은 생성시간의 Train, Valid, Test)
-meta_path = config.latest_file(config.PREP_DIR, "meta", "json")
-if meta_path is None:
-    print("전처리 결과가 없음. 먼저 python 03_전처리_모델학습/preprocess.py")
-    sys.exit()
-with open(meta_path, encoding="utf-8") as f:
-    meta = json.load(f)
-prep_stamp = meta["stamp"]
-target_kw = meta["target_kw"]
-
-parts = {}   # 분할별 DataFrame
-data = {}    # 분할별 (요약 특징, 시퀀스, 잔차)
-for split in ["train", "valid", "test"]:
-    folder = config.SPLIT_DIRS[split]
-    parts[split] = pd.read_parquet(os.path.join(folder, split + "_" + prep_stamp + ".parquet"))
-    data[split] = (
-        parts[split][TAB_COLS].to_numpy(dtype="float32"),
-        np.load(os.path.join(folder, split + "_seq_" + prep_stamp + ".npy")),
-        parts[split]["residual"].to_numpy(dtype="float64"),
-    )
-    print(split, "로드:", len(parts[split]), "샘플")
-
-run_id = config.stamp()
-run_dir = os.path.join(config.TRAIN_DIR, run_id)
-os.makedirs(os.path.join(run_dir, "models"), exist_ok=True)
-
-config.log("=== 학습 시작 " + run_id + " (전처리 " + prep_stamp + ") ===")
-config.log("목표전력 " + str(round(target_kw)) + " kW")
-
-rows = []         # 결과표
-preds = {}        # 모델별 valid, test 예측
-history = []      # Optuna 시도 기록
-
-# 2. 기준선 평가 (학습 없음)
-for label, col in [("기준 계산식", "proj_base"), ("추세 계산식", "proj_trend")]:
-    scores = {}
-    preds[label] = {}
-    for split in ["valid", "test"]:
-        preds[label][split] = parts[split][col].to_numpy()
-        scores[split] = evaluate(parts[split], preds[label][split], target_kw)
-    rows.append(make_row("기준선", label, scores))
-    config.log(label + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
-
-# 3. 모델별 튜닝 및 학습
-X_tr, S_tr, y_tr = data["train"]
-X_va, S_va, y_va = data["valid"]
-
-# 튜닝용 샘플 (TUNE_ROWS개)
-rng = np.random.default_rng(config.SEED)
-pick = rng.choice(len(y_tr), min(config.TUNE_ROWS, len(y_tr)), replace=False)
-
-models = {}
-valid_mae = {}
-
-for name in config.MODELS:
-    n_trials = config.TRIALS
-    if name in SEQ_MODELS:
-        n_trials = max(3, config.TRIALS // 3)   # 딥러닝은 시도 횟수 1/3
+# 모델 1개: Optuna 튜닝 -> train 전체 재학습 -> pkl 저장 -> 평가
+#   멀티프로세싱 자식에서도 돌아가므로 로그는 파일에 쓰지 않고 logs로 돌려줌
+def run_model(name, spec, parts, data, target_kw, pick, n_trials, n_jobs, run_dir, run_id, position=0):
+    X_tr, S_tr, y_tr = data["train"]
+    X_va, S_va, y_va = data["valid"]
 
     # Optuna: valid 잔차 MAE 최소화
     def objective(trial):
-        model = make_model(name, suggest_params(name, trial))
+        model = spec["build"](spec["suggest"](trial), n_jobs)
         model.fit(X_tr[pick], S_tr[pick], y_tr[pick])
         pred = model.predict(X_va, S_va)
         return float(np.mean(np.abs(pred - y_va)))
 
-    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=config.SEED))
-    pbar = tqdm(total=n_trials, desc=name)
-    study.optimize(objective, n_trials=n_trials, callbacks=[lambda s, t: pbar.update(1)])
+    pbar = tqdm(total=n_trials, desc=name, position=position)
+
+    def update_bar(study, trial):
+        pbar.update(1)
+
+    start = time.time()
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=SEED))
+    study.optimize(objective, n_trials=n_trials, callbacks=[update_bar])
     pbar.close()
 
-    for trial in study.trials:
-        history.append({"모델": name, "trial": trial.number, "valid 보정값 MAE": trial.value,
-                        "파라미터": json.dumps(trial.params)})
-
-    # 최적 파라미터로 train 전체 재학습
+    # 최적 파라미터로 train 전체 재학습 (DL은 에포크별 valid loss 기록)
     best = study.best_params
-    model = make_model(name, best)
-    model.fit(X_tr, S_tr, y_tr)
-    models[name] = model
-    joblib.dump(model, os.path.join(run_dir, "models", name + "_" + run_id + ".pkl"))
+    model = spec["build"](best, n_jobs)
+    if spec["kind"] == "DL":
+        model.fit(X_tr, S_tr, y_tr, valid=(X_va, S_va, y_va))
+    else:
+        model.fit(X_tr, S_tr, y_tr)
+    total_sec = time.time() - start
+    joblib.dump(model, os.path.join(run_dir, "models", f"{name}_{run_id}.pkl"))
 
     # 최종 예측 = 기준 계산식 + 예측 잔차
-    scores = {}
-    preds[name] = {}
-    for split in ["valid", "test"]:
+    preds = {}
+    for split in SPLITS:
         X, S, y = data[split]
-        preds[name][split] = parts[split]["proj_base"].to_numpy() + model.predict(X, S)
-        scores[split] = evaluate(parts[split], preds[name][split], target_kw)
-    valid_mae[name] = scores["valid"]["MAE"]
+        preds[split] = parts[split]["proj_base"].to_numpy() + model.predict(X, S)
+    scores = evaluate_all(parts, preds, target_kw)
 
-    row = make_row("단일", name, scores)
-    row["파라미터"] = json.dumps(best)
-    rows.append(row)
-    config.log(name + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
+    # 실행 에포크: Optuna가 고른 최대값(best["epochs"])이 아니라 실제로 돈 횟수
+    #   → early stopping으로 일찍 멈추면 둘이 다름
+    history = getattr(model, "history", [])
+    info = {
+        "trial 수": n_trials,
+        "실행 에포크": len(history) if len(history) > 0 else None,
+        "최적 에포크": getattr(model, "best_epoch", None),
+        "학습시간(초)": round(total_sec, 1),
+        "파라미터": json.dumps(best, ensure_ascii=False),
+    }
 
-# 4. 앙상블 선택
-#   - 2개 이상 모든 조합 x (단순 평균, 가중 평균) 중 valid MAE 최소
+    logs = [f"{name} valid MAE {scores['valid']['MAE']:.1f} / test MAE {scores['test']['MAE']:.1f} "
+            f"({total_sec:.0f}초)"]
+
+    return {"name": name, "preds": preds, "scores": scores, "info": info, "logs": logs}
+
+
+# 전체 모델 학습
+#   - ML: ProcessPoolExecutor로 병렬, 프로세스 수는 ML 모델 수를 넘지 않게
+#         (모델 4개에 workers 10이면 6개는 놀고, 코어만 10등분되어 모델당 코어가 줄어듦)
+#   - DL: ML이 끝난 뒤 메인 프로세스에서 순차, 혼자 돌므로 코어 전부 사용
+#   - 로그는 결과가 돌아온 뒤 메인에서 기록
+def run_all_models(parts, data, target_kw, run_dir, run_id, workers):
+    X_tr, S_tr, y_tr = data["train"]
+
+    # 튜닝용 샘플 (TUNE_ROWS개)
+    rng = np.random.default_rng(SEED)
+    pick = rng.choice(len(y_tr), min(TUNE_ROWS, len(y_tr)), replace=False)
+
+    ml_names = [name for name in MODELS if MODEL_SPECS[name]["kind"] == "ML"]
+    dl_names = [name for name in MODELS if MODEL_SPECS[name]["kind"] == "DL"]
+    dl_trials = max(3, TRIALS // 3)   # 딥러닝은 시도 횟수 1/3
+
+    workers = max(1, min(workers, len(ml_names)))
+    n_jobs = max(1, os.cpu_count() // workers)
+    config.write_log_print(f"ML 병렬 {workers}개 x 모델당 코어 {n_jobs}개")
+
+    results = {}
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        jobs = []
+        for i, name in enumerate(ml_names):
+            jobs.append(pool.submit(run_model, name, MODEL_SPECS[name], parts, data, target_kw, pick,
+                                    TRIALS, n_jobs, run_dir, run_id, i))
+        for job in as_completed(jobs):
+            result = job.result()
+            for line in result["logs"]:
+                config.write_log_print(line)
+            results[result["name"]] = result
+
+    for name in dl_names:
+        result = run_model(name, MODEL_SPECS[name], parts, data, target_kw, pick,
+                           dl_trials, os.cpu_count(), run_dir, run_id)
+        for line in result["logs"]:
+            config.write_log_print(line)
+        results[name] = result
+    return results
+
+
+# 앙상블: 모델 3개 조합 x (단순 평균, 가중 평균) 중 valid MAE 최소
 #   - 가중 평균 가중치 = valid MAE의 역수
-ens_rows = []
-best_ens = None
-for n in range(2, len(config.MODELS) + 1):
-    for combo in combinations(config.MODELS, n):
+def search_ensembles(preds, valid_mae, parts, target_kw, base_scores):
+    rows = []
+    best = None
+    for combo in combinations(MODELS, 3):
         for method in ["단순 평균", "가중 평균"]:
-            weights = []
-            for m in combo:
-                if method == "단순 평균":
-                    weights.append(1.0 / n)
-                else:
-                    weights.append(1.0 / valid_mae[m])
+            if method == "단순 평균":
+                weights = [1.0] * len(combo)
+            else:
+                weights = [1.0 / valid_mae[m] for m in combo]
             total = sum(weights)
             weights = [w / total for w in weights]
 
-            scores = {}
-            for split in ["valid", "test"]:
-                pred = np.zeros(len(parts[split]))
-                for i in range(len(combo)):
-                    pred = pred + weights[i] * preds[combo[i]][split]
-                scores[split] = evaluate(parts[split], pred, target_kw)
+            ens_pred = {}
+            for split in SPLITS:
+                ens_pred[split] = np.zeros(len(parts[split]))
+                for m, w in zip(combo, weights):
+                    ens_pred[split] = ens_pred[split] + w * preds[m][split]
+            scores = evaluate_all(parts, ens_pred, target_kw)
 
-            row = make_row("앙상블", "+".join(combo), scores)
-            row["방법"] = method
-            row["가중치"] = ", ".join([str(round(w, 2)) for w in weights])
-            ens_rows.append(row)
+            weight_text = ", ".join([f"{m} {w:.2f}" for m, w in zip(combo, weights)])
+            row = make_row("앙상블", f"{'+'.join(combo)} ({method})", scores, base_scores, weights=weight_text)
+            rows.append(row)
 
-            if best_ens is None or scores["valid"]["MAE"] < best_ens["valid MAE"]:
-                best_ens = row
-                best_ens["_members"] = list(combo)
-                best_ens["_weights"] = weights
+            if best is None or scores["valid"]["MAE"] < best["row"]["valid MAE"]:
+                best = {"row": row, "members": list(combo), "weights": weights}
 
-members = best_ens.pop("_members")
-weights = best_ens.pop("_weights")
-for row in ens_rows:
-    row.pop("_members", None)
-    row.pop("_weights", None)
-config.log("앙상블 선택: " + best_ens["모델"] + " (" + best_ens["방법"] + ") valid MAE "
-           + str(round(best_ens["valid MAE"], 1)) + " / test MAE " + str(round(best_ens["test MAE"], 1)))
+    best["row"]["선택"] = "✔"
+    return rows, best
 
-# 서빙용 형식으로 저장
-ens = {
-    "run_id": run_id,
-    "prep_stamp": prep_stamp,
-    "members": members,
-    "weights": weights,
-    "models": {m: models[m] for m in members},
-    "target_kw": target_kw,
-    "scale": meta["scale"],
-    "valid_mae": best_ens["valid MAE"],
-    "test_mae": best_ens["test MAE"],
-    "replay_from": meta["split"][config.REPLAY_SPLIT]["start"],
-}
-ens_path = os.path.join(run_dir, "ensemble_" + run_id + ".pkl")
-joblib.dump(ens, ens_path)
 
-# 5. 결과 엑셀 저장
-# 경과 시간별 MAE
-ens_pred = {}
-for split in ["valid", "test"]:
-    ens_pred[split] = np.zeros(len(parts[split]))
-    for i in range(len(members)):
-        ens_pred[split] = ens_pred[split] + weights[i] * preds[members[i]][split]
-preds["앙상블"] = ens_pred
-
-elapsed_rows = []
-for split in ["valid", "test"]:
-    part = parts[split]
-    actual = part["actual_kw"].to_numpy()
-    for minute in sorted(part["elapsed_min"].unique()):
-        mask = (part["elapsed_min"] == minute).to_numpy()
-        row = {"분할": split, "경과 (분)": minute}
-        for label in preds:
-            row[label] = float(np.mean(np.abs(preds[label][split][mask] - actual[mask])))
-        elapsed_rows.append(row)
-
-base_valid = rows[0]["valid MAE"]
-base_test = rows[0]["test MAE"]
-summary = pd.DataFrame([
-    {"항목": "run_id", "값": run_id},
-    {"항목": "전처리", "값": "meta_" + prep_stamp + ".json (Train / Valid / Test)"},
-    {"항목": "목표전력 (kW)", "값": round(target_kw, 1)},
-    {"항목": "선택 앙상블", "값": best_ens["모델"] + " (" + best_ens["방법"] + ")"},
-    {"항목": "가중치", "값": best_ens["가중치"]},
-    {"항목": "valid MAE 기준 계산식 -> 앙상블", "값": str(round(base_valid, 1)) + " -> " + str(round(best_ens["valid MAE"], 1))},
-    {"항목": "valid 개선율", "값": str(round((1 - best_ens["valid MAE"] / base_valid) * 100, 1)) + "%"},
-    {"항목": "test MAE 기준 계산식 -> 앙상블", "값": str(round(base_test, 1)) + " -> " + str(round(best_ens["test MAE"], 1))},
-    {"항목": "test 개선율", "값": str(round((1 - best_ens["test MAE"] / base_test) * 100, 1)) + "%"},
-])
-
-ens_table = pd.DataFrame(ens_rows).sort_values("valid MAE")
-excel_path = os.path.join(run_dir, "학습결과_" + run_id + ".xlsx")
-with pd.ExcelWriter(excel_path) as writer:
-    summary.to_excel(writer, sheet_name="0_요약", index=False)
-    pd.DataFrame(rows + [best_ens]).to_excel(writer, sheet_name="1_전체결과", index=False)
-    pd.DataFrame(elapsed_rows).to_excel(writer, sheet_name="2_경과시간별MAE", index=False)
-    pd.DataFrame(history).to_excel(writer, sheet_name="3_Optuna기록", index=False)
-    pd.DataFrame(list(PAPERS.items()), columns=["모델", "논문"]).to_excel(writer, sheet_name="4_모델근거", index=False)
-    ens_table.to_excel(writer, sheet_name="5_앙상블전체", index=False)
-config.log("저장: " + excel_path)
-
-# 6. 시뮬레이션 모델 교체 (--deploy)
-if deploy:
-    # 기존 모델과 valid MAE 비교 후 개선 시에만 교체 (기존 모델은 백업)
+# 시뮬레이션 모델 교체: 기존 모델과 valid MAE 비교 후 개선 시에만 교체 (기존 모델은 백업)
+def deploy_model(ens, ens_path, parts, data):
     old_mae = None
     if os.path.exists(config.SIM_MODEL_PATH):
         try:
@@ -283,13 +339,107 @@ if deploy:
             print("기존 모델 비교 실패 -> 새 모델로 교체:", e)
 
     if old_mae is not None and ens["valid_mae"] > old_mae:
-        config.log("배포 안 함: 새 모델 valid " + str(round(ens["valid_mae"], 1)) + " > 기존 " + str(round(old_mae, 1)))
+        config.write_log_print(f"배포 안 함: 새 모델 valid {ens['valid_mae']:.1f} > 기존 {old_mae:.1f}")
+        return
+
+    os.makedirs(os.path.dirname(config.SIM_MODEL_PATH), exist_ok=True)
+    if os.path.exists(config.SIM_MODEL_PATH):
+        backup = config.SIM_MODEL_PATH.replace("model.pkl", f"model_backup_{config.stamp()}.pkl")
+        shutil.copy(config.SIM_MODEL_PATH, backup)
+    shutil.copy(ens_path, config.SIM_MODEL_PATH)
+    config.write_log_print(f"배포 완료 -> {config.SIM_MODEL_PATH}")
+
+
+def main():
+    args = parse_args()
+
+    # 1. 데이터 로드
+    meta, parts, data = load_data()
+    prep_stamp = meta["stamp"]
+    target_kw = meta["target_kw"]
+
+    run_id = config.stamp()
+    run_dir = os.path.join(TRAIN_DIR, run_id)
+    os.makedirs(os.path.join(run_dir, "models"), exist_ok=True)
+
+    config.write_log_print(f"=== 학습 시작 {run_id} (전처리 {prep_stamp}) ===")
+    config.write_log_print(f"목표전력 {target_kw:.0f} kW")
+
+    preds = {}   # 이름별 {분할: 최종 예측}
+    rows = []    # 결과표 (모델별 1행)
+
+    # 2. 기준선 평가 (학습 없음), 개선율·과적합 판정의 기준
+    base_preds = {}
+    for split in SPLITS:
+        base_preds[split] = parts[split]["proj_base"].to_numpy()
+    base_scores = evaluate_all(parts, base_preds, target_kw)
+
+    for label, col in [("기준 계산식", "proj_base"), ("추세 계산식", "proj_trend")]:
+        preds[label] = {}
+        for split in SPLITS:
+            preds[label][split] = parts[split][col].to_numpy()
+        scores = evaluate_all(parts, preds[label], target_kw)
+        rows.append(make_row("기준선", label, scores, base_scores))
+        config.write_log_print(f"{label} valid MAE {scores['valid']['MAE']:.1f} / test MAE {scores['test']['MAE']:.1f}")
+
+    # 3. 모델별 튜닝 및 학습
+    results = run_all_models(parts, data, target_kw, run_dir, run_id, args.workers)
+
+    valid_mae = {}
+    for name in MODELS:
+        result = results[name]
+        preds[name] = result["preds"]
+        valid_mae[name] = result["scores"]["valid"]["MAE"]
+        rows.append(make_row("단일", name, result["scores"], base_scores, info=result["info"]))
+
+    # 4. 앙상블 선택 (valid MAE 기준)
+    ens_rows, best = search_ensembles(preds, valid_mae, parts, target_kw, base_scores)
+    best_row = best["row"]
+    config.write_log_print(f"앙상블 선택: {best_row['모델']} "
+                           f"valid MAE {best_row['valid MAE']:.1f} / test MAE {best_row['test MAE']:.1f}")
+
+    # 서빙용 형식으로 저장 (모델은 저장해 둔 pkl에서 로드)
+    models = {}
+    for m in best["members"]:
+        models[m] = joblib.load(os.path.join(run_dir, "models", f"{m}_{run_id}.pkl"))
+    ens = {
+        "run_id": run_id,
+        "prep_stamp": prep_stamp,
+        "members": best["members"],
+        "weights": best["weights"],
+        "models": models,
+        "target_kw": target_kw,
+        "scale": meta["scale"],
+        "valid_mae": best_row["valid MAE"],
+        "test_mae": best_row["test MAE"],
+        "replay_from": meta["split"][REPLAY_SPLIT]["start"],
+    }
+    ens_path = os.path.join(run_dir, f"ensemble_{run_id}.pkl")
+    joblib.dump(ens, ens_path)
+
+    # 5. 결과 출력 + 엑셀 저장 (시트 1개)
+    #   순서: 기준선 → 단일 → 앙상블(valid MAE 좋은 순)
+    ens_table = pd.DataFrame(ens_rows).sort_values("valid MAE")
+    table = pd.concat([pd.DataFrame(rows), ens_table], ignore_index=True).round(3)
+
+    # 콘솔에는 기준선, 단일, 선택된 앙상블만 (앙상블 40행은 엑셀에서 확인)
+    show = table[(table["유형"] != "앙상블") | (table["선택"] == "✔")]
+    print()
+    print(show[["모델", "유형", "train MAE", "valid MAE", "test MAE", "valid 개선율(%)",
+                "valid F1", "실행 에포크", "기준선 대비 비율", "과적합"]].to_string(index=False))
+    print()
+    config.write_log_print(f"valid 개선율 {best_row['valid 개선율(%)']:.1f}% / test 개선율 {best_row['test 개선율(%)']:.1f}%")
+
+    excel_path = os.path.join(run_dir, f"학습결과_{run_id}.xlsx")
+    table.to_excel(excel_path, sheet_name="결과", index=False, freeze_panes=(1, 2))
+    config.write_log_print(f"저장: {excel_path}")
+
+    # 6. 시뮬레이션 모델 교체 (--deploy)
+    if args.deploy:
+        deploy_model(ens, ens_path, parts, data)
     else:
-        os.makedirs(os.path.dirname(config.SIM_MODEL_PATH), exist_ok=True)
-        if os.path.exists(config.SIM_MODEL_PATH):
-            backup = config.SIM_MODEL_PATH.replace("model.pkl", "model_backup_" + config.stamp() + ".pkl")
-            shutil.copy(config.SIM_MODEL_PATH, backup)
-        shutil.copy(ens_path, config.SIM_MODEL_PATH)
-        config.log("배포 완료 -> " + config.SIM_MODEL_PATH)
-else:
-    print("시뮬레이션에 쓰려면 --deploy 붙여서 실행")
+        print("시뮬레이션에 쓰려면 --deploy 붙여서 실행")
+
+
+if __name__ == "__main__":
+    main()
