@@ -4,7 +4,7 @@
 #         Train/, Valid/, Test/   {분할}_{생성시간}.parquet  예측 시점별 특징, 정답
 #                                 {분할}_seq_{생성시간}.npy  최근 10분 시퀀스 (딥러닝 입력)
 #         전처리/meta_{생성시간}.json   배율, 목표전력, 분할 기간
-#   실행: python preprocess.py
+#   실행: python 3_preprocess.py
 #   - make_point는 시뮬레이션/serving/serve.py에도 같은 코드가 있음 (학습과 서빙 특징이 같아야 함)
 
 import json
@@ -26,7 +26,7 @@ VALID_RATIO = 0.15   # 나머지 0.15는 test
 TARGET_PCT = 95      # 목표전력: train 15분 평균 상위 5%
 SPLITS = ["train", "valid", "test"]
 
-logger = config.log_write_print("preprocess")
+logger = config.write_log_print("preprocess")
 
 
 # 현지 시각 변환 (시간대 없는 값은 이미 현지 시각으로 간주)
@@ -35,13 +35,6 @@ def to_local(ts):
     if ts.tzinfo is None:
         return ts
     return ts.tz_convert(config.LOCAL_TZ)
-
-
-# 10초 평균 (빈 칸은 보간 없이 NaN)
-def to_steps(series):
-    series = series.sort_index()
-    series = series[~series.index.duplicated()]
-    return series.resample(f"{config.STEP_SEC}s").mean()
 
 
 # 공장 전체 전력 로드 -> (10초 평균 kW, 배율)
@@ -55,7 +48,9 @@ def load_main_steps(path):
     running = kw[kw > kw.max() * 0.05]
     scale = P95_KW / np.percentile(running, 95)
 
-    return to_steps(kw * scale), scale
+    # 10초 평균 (빈 칸은 보간 없이 NaN)
+    steps = (kw * scale).resample(f"{config.STEP_SEC}s").mean()
+    return steps, scale
 
 
 # 예측 시점 1개의 특징 -> (요약 특징, 최근 10분 시퀀스), 빈 칸이 있으면 None
@@ -159,46 +154,34 @@ def split_by_date(df):
     return df
 
 
-# 분할별 기간, 피크 비율 기록 + 겹치는 날짜 확인
-def check_splits(df):
+# 분할별 기간, 샘플 수, 피크 비율
+def summarize_splits(df):
     split_info = {}
     for split in SPLITS:
         part = df[df["split"] == split]
-        peak_pct = part["is_peak"].mean() * 100
-        ratio = len(part) / len(df) * 100
-        split_info[split] = {
+        info = {
             "start": part["date"].min(),
             "end": part["date"].max(),
             "days": int(part["date"].nunique()),
             "samples": int(len(part)),
             "peak_ratio": float(part["is_peak"].mean()),
         }
-        logger.info(f"{split} {split_info[split]['start']} ~ {split_info[split]['end']} | "
-                    f"샘플 {len(part)} ({ratio:.1f}%) | {split_info[split]['days']}일 | 피크 비율 {peak_pct:.1f}%")
-        if peak_pct < 1:
-            logger.info(f"  -> {split} 기간 피크 거의 없음")
-
-    # 같은 날짜가 두 분할에 들어가면 안 됨
-    train_days = set(df.loc[df["split"] == "train", "date"])
-    valid_days = set(df.loc[df["split"] == "valid", "date"])
-    test_days = set(df.loc[df["split"] == "test", "date"])
-    overlap = (train_days & valid_days) | (train_days & test_days) | (valid_days & test_days)
-    logger.info(f"겹치는 날짜: {len(overlap)}")
+        split_info[split] = info
+        logger.info(f"{split} {info['start']} ~ {info['end']} | {info['days']}일 | "
+                    f"샘플 {info['samples']} | 피크 비율 {info['peak_ratio'] * 100:.1f}%")
     return split_info
 
 
 def main():
     # 출력 폴더에 이미 파일이 있으면 중단 (덮어쓰지 않음)
-    out_folders = [config.PREP_DIR]
-    for split in SPLITS:
-        out_folders.append(config.SPLIT_DIRS[split])
+    out_folders = [config.PREP_DIR] + list(config.SPLIT_DIRS.values())
     config.stop_if_output_exists(out_folders, logger)
 
     # 공장 전체 전력 로드 (10초 평균)
     folder = os.path.join(config.MACHINE_DIR, config.MAIN_METER)
     source_path = config.latest_file(folder, config.MAIN_METER, "parquet")
     if source_path is None:
-        logger.error(f"{config.MAIN_METER} parquet 없음: {folder} -> load_data.py 먼저 실행")
+        logger.error(f"{config.MAIN_METER} parquet 없음: {folder} -> 1_load_data.py 먼저 실행")
         sys.exit(1)
     steps, scale = load_main_steps(source_path)
     empty_pct = steps.isna().mean() * 100
@@ -218,7 +201,7 @@ def main():
     df["is_peak"] = df["actual_kw"] >= target_kw
     logger.info(f"목표전력 {target_kw:.0f} kW")
 
-    split_info = check_splits(df)
+    split_info = summarize_splits(df)
 
     # 저장 (분할별 폴더 + meta)
     run_stamp = config.stamp()
@@ -236,8 +219,6 @@ def main():
         "scale": float(scale),
         "target_kw": target_kw,
         "split": split_info,
-        "n_samples": int(len(df)),
-        "features": config.TAB_COLS,
     }
     meta_path = os.path.join(config.PREP_DIR, f"meta_{run_stamp}.json")
     with open(meta_path, "w", encoding="utf-8") as f:

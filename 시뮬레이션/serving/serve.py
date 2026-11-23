@@ -1,10 +1,10 @@
 # ML 그림자 운영: 30초마다 예측 기록, 구간 종료 후 계산식과 오차 비교
-#   입력: 시뮬레이션/model/model.pkl (train.py --deploy로 배포)
+#   입력: 시뮬레이션/model/model.pkl (4_train.py --deploy로 배포)
 #         시뮬레이션 DB raw.meter_reading, ops.demand_15min
 #   출력: ml.forecast (예측 기록), ml.window_eval (구간별 계산식 vs ML 오차)
 #   실행: python 시뮬레이션/serving/serve.py (simulator, controller, server 실행 중)
 #   - 제어는 controller의 기준 계산식이 담당, ML은 기록만 함
-#   - make_point는 루트 preprocess.py와 같은 코드 (학습과 서빙 특징이 같아야 함)
+#   - make_point는 루트 3_preprocess.py와 같은 코드 (학습과 서빙 특징이 같아야 함)
 #   - model.pkl 로드에 같은 폴더의 models.py가 필요함 (루트 models.py 말고 이 폴더 것을 씀)
 import os
 import sys
@@ -29,7 +29,7 @@ INTERVAL = 30          # 예측 주기 (초)
 load_dotenv(SERVING_DIR / ".env")
 DB_URL = os.getenv("DB_URL")
 
-logger = config.log_write_print("serve")
+logger = config.write_log_print("serve")
 
 
 def now_kst():
@@ -220,7 +220,7 @@ def evaluate(engine, ens):
 def main():
     if not os.path.exists(config.SIM_MODEL_PATH):
         logger.error("시뮬레이션/model/model.pkl 이 없습니다. "
-                     "먼저 python train.py --deploy 를 실행하세요.")
+                     "먼저 python 4_train.py --deploy 를 실행하세요.")
         return
     if not DB_URL:
         logger.error("serving/.env 에 DB_URL 이 없습니다. .env.example 을 참고하세요.")

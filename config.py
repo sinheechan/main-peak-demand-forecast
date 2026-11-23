@@ -1,8 +1,5 @@
-# 프로젝트 공통 설정
-#   - 경로와 로그(log_write_print)는 전부 여기서 가져옴
-#   - 경로가 아닌 값은 2개 이상 파일이 같이 쓰는 것만 (한 파일에서만 쓰는 값은 그 파일 위쪽)
-#   사용: import config
-#         logger = config.log_write_print("train")
+# 프로젝트 공통 설정: 경로, 로그, 여러 파일이 같이 쓰는 값
+#   (한 파일에서만 쓰는 값은 그 파일 위쪽에 둠)
 
 import glob
 import logging
@@ -15,8 +12,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 
 RAW_DIR = os.path.join(ROOT, "data", "raw")              # 원본 zip (load_data 입력)
 MACHINE_DIR = os.path.join(ROOT, "data", "machines")     # 기기별 parquet, csv (load_data 출력)
-REPORT_DIR = os.path.join(ROOT, "reports")               # 분석 엑셀·그래프 (analyze_data 출력)
 OUTPUT_DIR = os.path.join(ROOT, "outputs")
+REPORT_DIR = os.path.join(OUTPUT_DIR, "reports")         # 분석 엑셀·그래프 (analyze_data 출력)
 PREP_DIR = os.path.join(OUTPUT_DIR, "전처리")             # meta (preprocess 출력)
 SPLIT_DIRS = {                                           # 분할별 샘플 (preprocess 출력)
     "train": os.path.join(OUTPUT_DIR, "Train"),
@@ -26,7 +23,7 @@ SPLIT_DIRS = {                                           # 분할별 샘플 (pre
 TRAIN_DIR = os.path.join(OUTPUT_DIR, "학습결과")          # 모델·결과 엑셀 (train 출력)
 SIM_MODEL_PATH = os.path.join(ROOT, "시뮬레이션", "model", "model.pkl")   # 시뮬레이션 사용 모델 (train --deploy, serve)
 SIM_INFO_PATH = os.path.join(ROOT, "시뮬레이션", "model", "model_info.json")   # 목표전력·배율·재생 정보 (train --deploy, edge)
-LOG_PATH = os.path.join(ROOT, "logs", "main.log")                 # log_write_print 용
+LOG_PATH = os.path.join(ROOT, "logs", "main.log")                 # write_log_print 용
 
 # 데이터
 MAIN_METER = "MainTerminal"     # 공장 전체 미터 (예측 대상)
@@ -63,7 +60,7 @@ def latest_file(folder, name, ext):
 
 # 터미널 + 로그 파일(logs/main.log)에 같이 기록하는 logger
 #   형식: 2026-11-22 18:30:00 | 메시지
-def log_write_print(name):
+def write_log_print(name):
     logger = logging.getLogger(name)
     if len(logger.handlers) > 0:
         return logger
