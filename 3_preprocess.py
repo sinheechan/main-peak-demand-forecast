@@ -1,9 +1,9 @@
 # 학습 샘플 생성 및 날짜 기준 train / valid / test 분할
 #   입력: data/machines/MainTerminal/ 최신 parquet
-#   출력: outputs/
+#   출력: data/학습데이터/
 #         Train/, Valid/, Test/   {분할}_{생성시간}.parquet  예측 시점별 특징, 정답
 #                                 {분할}_seq_{생성시간}.npy  최근 10분 시퀀스 (딥러닝 입력)
-#         전처리/meta_{생성시간}.json   배율, 목표전력, 분할 기간
+#         outputs/전처리/meta_{생성시간}.json   배율, 목표전력, 분할 기간
 #   실행: python 3_preprocess.py
 #   - make_point는 시뮬레이션/serving/serve.py에도 같은 코드가 있음 (학습과 서빙 특징이 같아야 함)
 

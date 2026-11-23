@@ -15,10 +15,11 @@ MACHINE_DIR = os.path.join(ROOT, "data", "machines")     # 기기별 parquet, cs
 OUTPUT_DIR = os.path.join(ROOT, "outputs")
 REPORT_DIR = os.path.join(OUTPUT_DIR, "reports")         # 분석 엑셀·그래프 (analyze_data 출력)
 PREP_DIR = os.path.join(OUTPUT_DIR, "전처리")             # meta (preprocess 출력)
+SPLIT_DIR = os.path.join(ROOT, "data", "학습데이터")
 SPLIT_DIRS = {                                           # 분할별 샘플 (preprocess 출력)
-    "train": os.path.join(OUTPUT_DIR, "Train"),
-    "valid": os.path.join(OUTPUT_DIR, "Valid"),
-    "test": os.path.join(OUTPUT_DIR, "Test"),
+    "train": os.path.join(SPLIT_DIR, "Train"),
+    "valid": os.path.join(SPLIT_DIR, "Valid"),
+    "test": os.path.join(SPLIT_DIR, "Test"),
 }
 TRAIN_DIR = os.path.join(OUTPUT_DIR, "학습결과")          # 모델·결과 엑셀 (train 출력)
 SIM_MODEL_PATH = os.path.join(ROOT, "시뮬레이션", "model", "model.pkl")   # 시뮬레이션 사용 모델 (train --deploy, serve)

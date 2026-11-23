@@ -1,5 +1,5 @@
 # 모델 튜닝·학습·평가 및 앙상블 선택
-#   입력: outputs/전처리/ 최신 meta, 같은 생성시간의 outputs/Train/, Valid/, Test/ 데이터
+#   입력: outputs/전처리/ 최신 meta, 같은 생성시간의 data/학습데이터/Train/, Valid/, Test/ 데이터
 #   출력: outputs/학습결과/{생성시간}/
 #         학습결과_{생성시간}.xlsx (시트 1개, 모델별 1행), models/{모델}_{생성시간}.pkl, ensemble_{생성시간}.pkl
 #   실행: python 4_train.py
