@@ -1,10 +1,12 @@
-# 예측 모델 정의 (ridge, rf, xgb, lgbm, gru, cnn)
+# 예측 모델 정의 (ridge, rf, xgb, lgbm, gru, cnn) - train.py에서 사용
 #   사용: spec = MODEL_SPECS["lgbm"]
 #         model = spec["build"](params, n_jobs)
 #         model.fit(X_tab, X_seq, y)       y = 실제 15분 평균 - 기준 계산식
 #         model.predict(X_tab, X_seq)      보정값 예측
 #   - 최종 예측 = 기준 계산식 + 보정값
-#   - model.pkl에 클래스 이름이 저장되므로 TabModel, SeqModel, GRUNet, CNNNet 이름 변경 금지
+#   - model.pkl에 "models.클래스이름"으로 저장되므로 파일 이름(models.py)과
+#     TabModel, SeqModel, GRUNet, CNNNet 이름 변경 금지
+#   - 시뮬레이션/serving/models.py에 예측에 필요한 부분만 같은 코드로 있음 (둘이 같아야 model.pkl 로드됨)
 #   - 멀티프로세싱에서 pickle 되도록 함수는 전부 최상위 def (lambda 금지)
 
 import numpy as np
@@ -18,7 +20,6 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
 import config
-from common.features import EXTRA_COLS, TAB_COLS
 
 BATCH = 512
 SEED = 42
@@ -95,10 +96,10 @@ class SeqModel:
 
     # 보조 특징 추출 (kW 값은 NORM으로 정규화)
     def make_extra(self, X_tab):
-        extra = np.zeros((len(X_tab), len(EXTRA_COLS)), dtype="float32")
-        for j in range(len(EXTRA_COLS)):
-            col = EXTRA_COLS[j]
-            extra[:, j] = X_tab[:, TAB_COLS.index(col)]
+        extra = np.zeros((len(X_tab), len(config.EXTRA_COLS)), dtype="float32")
+        for j in range(len(config.EXTRA_COLS)):
+            col = config.EXTRA_COLS[j]
+            extra[:, j] = X_tab[:, config.TAB_COLS.index(col)]
             if col == "proj_base" or col == "kw_now":
                 extra[:, j] = extra[:, j] / config.NORM
         return extra
@@ -117,9 +118,9 @@ class SeqModel:
     def fit(self, X_tab, X_seq, y, valid=None):
         torch.manual_seed(SEED)
         if self.name == "gru":
-            self.net = GRUNet(self.params["hidden"], len(EXTRA_COLS))
+            self.net = GRUNet(self.params["hidden"], len(config.EXTRA_COLS))
         else:
-            self.net = CNNNet(self.params["channels"], len(EXTRA_COLS))
+            self.net = CNNNet(self.params["channels"], len(config.EXTRA_COLS))
 
         seq = torch.tensor(X_seq, dtype=torch.float32)
         extra = torch.tensor(self.make_extra(X_tab))
@@ -152,7 +153,9 @@ class SeqModel:
             self.history.append(row)
 
         if valid is not None:
-            losses = [row["valid_loss"] for row in self.history]
+            losses = []
+            for row in self.history:
+                losses.append(row["valid_loss"])
             self.best_epoch = int(np.argmin(losses)) + 1
 
     def predict(self, X_tab, X_seq):
@@ -258,9 +261,6 @@ MODEL_SPECS = {
     "cnn": {"kind": "DL", "suggest": suggest_cnn, "build": build_cnn},
 }
 
-SEQ_MODELS = [name for name in MODEL_SPECS if MODEL_SPECS[name]["kind"] == "DL"]
-
-
 # 기존 호출 방식 유지용
 def suggest_params(name, trial):
     return MODEL_SPECS[name]["suggest"](trial)
@@ -272,7 +272,7 @@ def make_model(name, params, n_jobs=-1):
 
 # 앙상블 예측 (model.pkl 형식, df에 TAB_COLS 필요)
 def predict_ensemble(ens, df, X_seq):
-    X_tab = df[TAB_COLS].to_numpy(dtype="float32")
+    X_tab = df[config.TAB_COLS].to_numpy(dtype="float32")
     base = df["proj_base"].to_numpy(dtype="float64")
     total = np.zeros(len(df))
     for i in range(len(ens["members"])):

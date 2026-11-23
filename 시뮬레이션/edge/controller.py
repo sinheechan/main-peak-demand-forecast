@@ -10,9 +10,10 @@ import paho.mqtt.client as mqtt
 from pymodbus.client import ModbusTcpClient
 
 from config import (ESS_KW, MODBUS_HOST, MODBUS_PORT, MQTT_HOST, MQTT_PASS, MQTT_PORT, MQTT_USER,
-                    SHED_ORDER, SITE, TARGET_KW, now_kst)
+                    SHED_ORDER, SITE, model_info, now_kst)
 from demand import Demand
 
+TARGET_KW = model_info()["target_kw"]   # 목표 최대수요전력 (15분 평균, 학습과 같은 값)
 TOPIC = f"site/{SITE}"
 WARN = 0.9      # 목표의 90% 이상 -> ESS 방전
 SAFE = 0.8      # 목표의 80% 미만 -> 복귀

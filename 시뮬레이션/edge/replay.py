@@ -9,18 +9,17 @@ import pandas as pd
 
 class Replay:
 
-    # p95_kw: 규모 기준 (03 전처리와 같은 배율 계산)
+    # scale: 전처리 배율 (model_info.json, 학습 데이터와 같은 규모)
     # start_date: 재생 시작일 (학습 기간 제외용)
     # - 전압은 상전압(약 238V)이라 중앙값 대비 비율만 사용
-    def __init__(self, path, p95_kw, hour, minute, local_tz, start_date=None):
+    def __init__(self, path, scale, hour, minute, local_tz, start_date=None):
         print(f"재생 데이터 로드 중: {path}")
         df = pd.read_parquet(path)
         has_volt = "V1_V" in df.columns
 
         index = pd.DatetimeIndex(df["tmp_timestamp"])
         kw = pd.Series(df["P_kW"].to_numpy(dtype="float64"), index=index).clip(lower=0)
-        running = kw[kw > kw.max() * 0.05]
-        self.scale = p95_kw / np.percentile(running, 95)
+        self.scale = scale
 
         # 1초 간격 확장 (UTC 기준이라 서머타임 전환에도 중복 없음)
         frame = pd.DataFrame({"kw": kw * self.scale})

@@ -14,7 +14,7 @@ from pymodbus.server import StartAsyncTcpServer
 import config
 from config import LOAD_KW, MODBUS_PORT, now_kst
 
-# 부하 데이터: HIPE 공장 전체 재생 (01_데이터관리 최신 parquet)
+# 부하 데이터: HIPE 공장 전체 재생 (model_info.json의 전처리 원본 parquet, 같은 배율)
 #   - USE_REPLAY = False 또는 파일이 없으면 시간대별 합성 부하
 USE_REPLAY = True
 SIM_HOUR = 10               # 시각 고정 (테스트용, None = 현재 시각)
@@ -133,16 +133,19 @@ async def main():
     replay = None
     path = None
     if USE_REPLAY:
-        path = config.replay_path()
+        info = config.model_info()
+        path = config.REPLAY_DIR / info["source"]
+        if not path.exists():
+            print(f"재생 파일 없음: {path}")
+            path = None
     if path is not None:
         from replay import Replay   # 재생 시에만 pandas 로드
         t = now_kst()
         hour = t.hour
         if SIM_HOUR is not None:
             hour = SIM_HOUR
-        start = config.replay_from()
-        print(f"재생 시작일: {start} ({config.REPLAY_SPLIT} 기간)")
-        replay = Replay(path, config.P95_KW, hour, t.minute, config.LOCAL_TZ, start)
+        print(f"모델 {info['run_id']} 기준: 목표 {info['target_kw']:,.0f} kW, 재생 시작일 {info['replay_from']}")
+        replay = Replay(path, info["scale"], hour, t.minute, config.LOCAL_TZ, info["replay_from"])
     else:
         print("부하: 시간대별 합성 데이터 (재생 파일 없음)")
 

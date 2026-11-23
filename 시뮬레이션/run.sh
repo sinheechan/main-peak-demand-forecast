@@ -1,7 +1,7 @@
 #!/bin/bash
 # 시뮬레이션 전체 실행: 서버(docker) → 가상 계측기 → 제어기 → ML 서빙 (tmux 한 화면)
-#   ./04_시뮬레이션/run.sh        시작 (이미 켜져 있으면 화면만 다시 붙음)
-#   ./04_시뮬레이션/run.sh stop   전체 종료
+#   ./시뮬레이션/run.sh        시작 (이미 켜져 있으면 화면만 다시 붙음)
+#   ./시뮬레이션/run.sh stop   전체 종료
 SIM="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SIM/.." && pwd)"
 VENV="source $ROOT/.venv/bin/activate"
@@ -15,8 +15,9 @@ fi
 
 tmux has-session -t power 2>/dev/null && exec tmux attach -t power
 
-if [ ! -f "$SIM/model/model.pkl" ]; then
-    echo "model/model.pkl 이 없습니다. 먼저: python 03_전처리_모델학습/train.py --deploy"
+if [ ! -f "$SIM/model/model.pkl" ] || [ ! -f "$SIM/model/model_info.json" ]; then
+    echo "model/model.pkl 또는 model_info.json 이 없습니다. 먼저: python main.py"
+    exit 1
 fi
 
 if ! docker info >/dev/null 2>&1; then

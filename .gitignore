@@ -5,14 +5,13 @@ __pycache__/
 *Zone.Identifier
 
 # 데이터 · 산출물 (용량이 크고 다시 만들 수 있음)
-01_데이터관리/raw/*
-!01_데이터관리/raw/.gitkeep
-01_데이터관리/machines/
-02_데이터분석/reports/
-03_전처리_모델학습/outputs/
-04_시뮬레이션/model/*.pkl
-04_시뮬레이션/server/mosquitto/data/
-04_시뮬레이션/server/mosquitto/config/passwd
-logs/
 data/
+outputs/
+reports/*.xlsx
+reports/*.png
+시뮬레이션/model/*.pkl
+시뮬레이션/model/model_info.json
+시뮬레이션/server/mosquitto/data/
+시뮬레이션/server/mosquitto/config/passwd
+logs/
 _old*/

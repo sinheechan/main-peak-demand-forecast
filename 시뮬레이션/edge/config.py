@@ -1,11 +1,11 @@
 # 엣지 공통 설정 (simulator, controller, scenario 공용)
 #   - 비밀번호는 .env, 나머지는 이 파일에서 관리
-#   - 재생 데이터: 01_데이터관리/machines/MainTerminal/ 최신 parquet
-#   - 재생 시작일: 03 전처리 meta의 REPLAY_SPLIT 시작일 (학습에 안 쓴 기간)
+#   - 목표전력·배율·재생 파일·재생 시작일: main.py(train --deploy)가 만든 model/model_info.json
+#     (학습에 쓴 전처리 결과와 같은 값으로 시뮬레이션)
 
-import glob
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,7 +25,6 @@ MQTT_HOST = "localhost"
 MQTT_PORT = 1883
 SITE = "plant1"
 
-TARGET_KW = 1600   # 목표 최대수요전력 (15분 평균)
 ESS_KW = 200       # ESS 방전 출력
 
 # 차단 가능 부하 (코일 주소 0, 1, 2 = load1, load2, load3)
@@ -40,32 +39,19 @@ SHED_ORDER = [2, 1, 0]   # 차단 순서 (중요도 낮은 load3부터)
 #   30: 시나리오 번호 (scenario.py 기록)
 
 # 재생 데이터 (HIPE 공장 전체)
-MAIN_METER = "MainTerminal"
+REPLAY_DIR = ROOT / "data" / "machines" / "MainTerminal"
 LOCAL_TZ = "Europe/Berlin"         # 공장 현지 시간대
-P95_KW = 1400                      # 규모 기준 (03 전처리와 동일)
-REPLAY_SPLIT = "valid"             # 재생 기간 (test는 연휴라 피크가 거의 없음)
+MODEL_INFO_PATH = EDGE_DIR.parent / "model" / "model_info.json"
+
 
 def now_kst():
     return datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
 
 
-# {name}_{생성시간}.{ext} 중 최신 파일 반환, 없으면 None
-def latest(folder, name, ext):
-    files = sorted(glob.glob(os.path.join(str(folder), name + "_*." + ext)))
-    if len(files) == 0:
-        return None
-    return files[-1]
-
-
-def replay_path():
-    return latest(ROOT / "01_데이터관리" / "machines" / MAIN_METER, MAIN_METER, "parquet")
-
-
-def replay_from():
-    # 재생 시작일 (meta 없으면 None -> 전체 재생)
-    meta_path = latest(ROOT / "03_전처리_모델학습" / "outputs" / "전처리", "meta", "json")
-    if meta_path is None:
-        return None
-    with open(meta_path, encoding="utf-8") as f:
-        meta = json.load(f)
-    return meta.get("split", {}).get(REPLAY_SPLIT, {}).get("start")
+# main.py 결과 (target_kw: 목표 최대수요전력, scale: 전처리 배율, source: 전처리에 쓴 parquet, replay_from: 재생 시작일)
+def model_info():
+    if not MODEL_INFO_PATH.exists():
+        print(f"{MODEL_INFO_PATH} 이 없습니다. 먼저: python main.py")
+        sys.exit(1)
+    with open(MODEL_INFO_PATH, encoding="utf-8") as f:
+        return json.load(f)
