@@ -1,26 +1,27 @@
-# 대시보드 테마 (다크 고정, 스킬 템플릿 dense-dashboard의 다크 색상 기반)
+# 대시보드 테마 (라이트 고정, 스킬 템플릿 dense-dashboard의 라이트 색상 기반)
 #   - 색, 여백은 여기서만 설정 (app.py에 CSS 없음)
+#   - 차트 색은 app.py 위쪽 색 상수와 같은 값
 
 [theme]
-base = "dark"
-primaryColor = "#2563EB"
-backgroundColor = "#0F172A"
-secondaryBackgroundColor = "#1E293B"
-codeBackgroundColor = "#1E293B"
-textColor = "#F1F5F9"
-linkColor = "#60A5FA"
-borderColor = "#334155"
-greenColor = "#34D399"
-redColor = "#F87171"
-yellowColor = "#FBBF24"
-orangeColor = "#FB923C"
-blueColor = "#60A5FA"
-violetColor = "#A78BFA"
-grayColor = "#94A3B8"
-chartCategoricalColors = ["#60A5FA", "#F87171", "#94A3B8", "#A78BFA", "#34D399", "#FBBF24"]
-dataframeBorderColor = "#334155"
-dataframeHeaderBackgroundColor = "#1E293B"
-dataframeHeaderTextColor = "#F8FAFC"
+base = "light"
+primaryColor = "#1D4ED8"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F5F9"
+codeBackgroundColor = "#F1F5F9"
+textColor = "#0F172A"
+linkColor = "#1D4ED8"
+borderColor = "#CBD5E1"
+greenColor = "#059669"
+redColor = "#DC2626"
+yellowColor = "#D97706"
+orangeColor = "#EA580C"
+blueColor = "#1D4ED8"
+violetColor = "#7C3AED"
+grayColor = "#64748B"
+chartCategoricalColors = ["#3B82F6", "#DC2626", "#64748B", "#7C3AED", "#059669", "#EA580C"]
+dataframeBorderColor = "#CBD5E1"
+dataframeHeaderBackgroundColor = "#E2E8F0"
+dataframeHeaderTextColor = "#0F172A"
 showWidgetBorder = true
 baseRadius = "6px"
 baseFontSize = 14
