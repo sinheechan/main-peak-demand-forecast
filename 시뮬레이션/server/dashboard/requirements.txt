@@ -1,6 +1,5 @@
-streamlit           # 웹 대시보드
+streamlit==1.67.0  # 웹 대시보드 (st.echarts_chart 등 최신 기능을 써서 고정)
 pandas              # 표 데이터 처리
 sqlalchemy          # DB 연결 관리
 psycopg[binary]     # PostgreSQL 드라이버
 tzdata              # 시간대 정보
-altair              # 차트 (streamlit 의존성이지만 직접 import하므로 명시)

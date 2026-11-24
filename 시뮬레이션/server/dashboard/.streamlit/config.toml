@@ -1,0 +1,30 @@
+# 대시보드 테마 (다크 고정, 스킬 템플릿 dense-dashboard의 다크 색상 기반)
+#   - 색, 여백은 여기서만 설정 (app.py에 CSS 없음)
+
+[theme]
+base = "dark"
+primaryColor = "#2563EB"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+codeBackgroundColor = "#1E293B"
+textColor = "#F1F5F9"
+linkColor = "#60A5FA"
+borderColor = "#334155"
+greenColor = "#34D399"
+redColor = "#F87171"
+yellowColor = "#FBBF24"
+orangeColor = "#FB923C"
+blueColor = "#60A5FA"
+violetColor = "#A78BFA"
+grayColor = "#94A3B8"
+chartCategoricalColors = ["#60A5FA", "#F87171", "#94A3B8", "#A78BFA", "#34D399", "#FBBF24"]
+dataframeBorderColor = "#334155"
+dataframeHeaderBackgroundColor = "#1E293B"
+dataframeHeaderTextColor = "#F8FAFC"
+showWidgetBorder = true
+baseRadius = "6px"
+baseFontSize = 14
+headingFontSizes = ["22px", "18px", "15px", "14px", "13px", "12px"]
+metricValueFontSize = "26px"
+paddingTop = "0.5rem"
+paddingBottom = "1rem"
