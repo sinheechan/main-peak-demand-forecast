@@ -1,0 +1,19 @@
+# 루트 .venv 하나로 1~4단계, 시뮬레이션 edge, serving 실행
+# torch 는 CPU 버전을 따로 설치:  pip install torch --index-url https://download.pytorch.org/whl/cpu
+pandas
+numpy
+pyarrow                   # parquet 저장, 읽기
+openpyxl                  # 분석, 학습 결과 엑셀
+tqdm
+matplotlib
+koreanize-matplotlib      # 그래프 한글 폰트
+scikit-learn
+lightgbm
+xgboost
+optuna
+joblib
+python-dotenv             # .env 읽기 (edge, serving)
+sqlalchemy                # serving DB 연결
+psycopg[binary]           # PostgreSQL 드라이버
+pymodbus==3.6.9           # edge 가상 계측기, 제어기 (버전마다 함수 이름이 바뀌어서 고정)
+paho-mqtt==2.1.0          # edge MQTT 전송 (2.x부터 콜백 형식이 바뀌어서 고정)
