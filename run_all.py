@@ -5,6 +5,7 @@
 import os
 import subprocess
 import sys
+from config import *
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -20,10 +21,10 @@ start = int(sys.argv[1]) if len(sys.argv) > 1 else 1
 for i, step in enumerate(STEPS, start=1):
     if i < start:
         continue
-    print(f"\n===== [{i}/{len(STEPS)}] {' '.join(step)} =====")
+    write_log_print(f"\n===== [{i}/{len(STEPS)}] {' '.join(step)} =====")
     result = subprocess.run([sys.executable, os.path.join(ROOT, step[0])] + step[1:], cwd=ROOT)
     if result.returncode != 0:
-        print(f"\n[{i}] {step[0]} 실패 (종료 코드 {result.returncode}). 수정 후: python run_all.py {i}")
+        write_log_print(f"\n[{i}] {step[0]} 실패 (종료 코드 {result.returncode}). 수정 후: python run_all.py {i}")
         sys.exit(result.returncode)
 
-print("\n완료. 시뮬레이션: ./04_시뮬레이션/run.sh")
+write_log_print("\n완료. 시뮬레이션: ./04_시뮬레이션/run.sh")
