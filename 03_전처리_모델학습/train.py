@@ -97,8 +97,8 @@ run_id = stamp()
 run_dir = os.path.join(TRAIN_DIR, run_id)
 os.makedirs(os.path.join(run_dir, "models"), exist_ok=True)
 
-write_log_print("=== 학습 시작 " + run_id + " (전처리 " + prep_stamp + ") ===")
-write_log_print("목표전력 " + str(round(target_kw)) + " kW")
+write_log_print(f"=== 학습 시작 {run_id} (전처리 {prep_stamp}) ===")
+write_log_print(f"목표전력 {target_kw:.0f} kW")
 
 rows = []         # 결과표
 preds = {}        # 모델별 valid, test 예측
@@ -112,7 +112,7 @@ for label, col in [("기준 계산식", "proj_base"), ("추세 계산식", "proj
         preds[label][split] = parts[split][col].to_numpy()
         scores[split] = evaluate(parts[split], preds[label][split], target_kw)
     rows.append(make_row("기준선", label, scores))
-    write_log_print(label + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
+    write_log_print(f"{label} valid MAE {scores['valid']['MAE']:.1f} / test MAE {scores['test']['MAE']:.1f}")
 
 # 3. 모델별 튜닝 및 학습
 X_tr, S_tr, y_tr = data["train"]
@@ -165,7 +165,7 @@ for name in MODELS:
     row = make_row("단일", name, scores)
     row["파라미터"] = json.dumps(best)
     rows.append(row)
-    write_log_print(name + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
+    write_log_print(f"{name} valid MAE {scores['valid']['MAE']:.1f} / test MAE {scores['test']['MAE']:.1f}")
 
 # 4. 앙상블 선택
 #   - 2개 이상 모든 조합 x (단순 평균, 가중 평균) 중 valid MAE 최소
@@ -206,8 +206,7 @@ weights = best_ens.pop("_weights")
 for row in ens_rows:
     row.pop("_members", None)
     row.pop("_weights", None)
-write_log_print("앙상블 선택: " + best_ens["모델"] + " (" + best_ens["방법"] + ") valid MAE "
-           + str(round(best_ens["valid MAE"], 1)) + " / test MAE " + str(round(best_ens["test MAE"], 1)))
+write_log_print(f"앙상블 선택: {best_ens['모델']} ({best_ens['방법']}) valid MAE {best_ens['valid MAE']:.1f} / test MAE {best_ens['test MAE']:.1f}")
 
 # 서빙용 형식으로 저장
 ens = {
@@ -268,7 +267,7 @@ with pd.ExcelWriter(excel_path) as writer:
     pd.DataFrame(history).to_excel(writer, sheet_name="3_Optuna기록", index=False)
     pd.DataFrame(list(PAPERS.items()), columns=["모델", "논문"]).to_excel(writer, sheet_name="4_모델근거", index=False)
     ens_table.to_excel(writer, sheet_name="5_앙상블전체", index=False)
-write_log_print("저장: " + excel_path)
+write_log_print(f"저장: {excel_path}")
 
 # 6. 시뮬레이션 모델 교체 (--deploy)
 if deploy:
@@ -283,13 +282,13 @@ if deploy:
             print("기존 모델 비교 실패 -> 새 모델로 교체:", e)
 
     if old_mae is not None and ens["valid_mae"] > old_mae:
-        write_log_print("배포 안 함: 새 모델 valid " + str(round(ens["valid_mae"], 1)) + " > 기존 " + str(round(old_mae, 1)))
+        write_log_print(f"배포 안 함: 새 모델 valid {ens['valid_mae']:.1f} > 기존 {old_mae:.1f}")
     else:
         os.makedirs(os.path.dirname(SIM_MODEL_PATH), exist_ok=True)
         if os.path.exists(SIM_MODEL_PATH):
             backup = SIM_MODEL_PATH.replace("model.pkl", "model_backup_" + stamp() + ".pkl")
             shutil.copy(SIM_MODEL_PATH, backup)
         shutil.copy(ens_path, SIM_MODEL_PATH)
-        write_log_print("배포 완료 -> " + SIM_MODEL_PATH)
+        write_log_print(f"배포 완료 -> {SIM_MODEL_PATH}")
 else:
     print("시뮬레이션에 쓰려면 --deploy 붙여서 실행")

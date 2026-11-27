@@ -154,4 +154,4 @@ with pd.ExcelWriter(out_path) as writer:
         pattern.rename_axis("요일 \\ 시").to_excel(writer, sheet_name="6_시간대패턴")
     relation.to_excel(writer, sheet_name="7_장비관계", index=False)
 
-write_log_print("완료: " + out_path)
+write_log_print(f"완료: {out_path}")

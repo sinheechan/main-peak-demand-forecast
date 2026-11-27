@@ -23,7 +23,7 @@ zip_path = zip_list[0]
 
 zip_file = zipfile.ZipFile(zip_path)
 run_stamp = stamp()
-write_log_print("zip: " + os.path.basename(zip_path))
+write_log_print(f"zip: {os.path.basename(zip_path)}")
 
 info = []  # manifest 기록용
 
@@ -91,10 +91,10 @@ for file_name in tqdm(zip_list()):
         "parquet": parquet_path,
         "csv": csv_path,
     })
-    write_log_print(machine + " " + str(df.shape))
+    write_log_print(f"{machine} {df.shape}")
 
 # 3. 기기별 요약(manifest) 저장
 manifest = pd.DataFrame(info)
 manifest_path = os.path.join(MACHINE_DIR, "manifest_" + run_stamp + ".csv")
 manifest.to_csv(manifest_path, index=False, encoding="utf-8-sig")
-write_log_print("완료: 기기 " + str(len(info)) + "개 -> " + MACHINE_DIR)
+write_log_print(f"완료: 기기 {len(info)}개 -> {MACHINE_DIR}")
