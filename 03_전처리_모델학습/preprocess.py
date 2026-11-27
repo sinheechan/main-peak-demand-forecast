@@ -15,12 +15,12 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+from config import *
 from common import features
 
 # 1. 공장 전체 전력 로드 (10초 평균)
 steps, scale, source_path = features.load_main_steps()
-config.write_log_print("10초 칸 " + str(len(steps)) + "개, 빈 칸 " + str(round(steps.isna().mean() * 100, 2)) + "%, 배율 x" + str(round(scale, 2)))
+write_log_print("10초 칸 " + str(len(steps)) + "개, 빈 칸 " + str(round(steps.isna().mean() * 100, 2)) + "%, 배율 x" + str(round(scale, 2)))
 
 # 2. 샘플 생성 (15분 구간별, 2~14분 시점 1분 간격)
 values = steps.to_numpy(dtype="float64")
@@ -32,21 +32,21 @@ rows = []
 seqs = []
 for ws in tqdm(window_list):
     start = steps.index.get_loc(ws)
-    window = values[start:start + config.WINDOW]
+    window = values[start:start + WINDOW]
 
     # 90칸이 모두 있는 구간만 사용 (정답 계산 가능)
-    if len(window) < config.WINDOW or np.isnan(window).any():
+    if len(window) < WINDOW or np.isnan(window).any():
         continue
     actual = float(window.mean())
 
-    for k in range(config.FIRST, config.LAST + 1, config.EVERY):
+    for k in range(FIRST, LAST + 1, EVERY):
         point = features.make_point(values, start, k, ws)
         if point is None:
             continue
         tab, seq = point
         tab["window_start"] = ws
         tab["date"] = str(features.to_local(ws).date())   # 현지 날짜
-        tab["elapsed_min"] = k * config.STEP_SEC / 60
+        tab["elapsed_min"] = k * STEP_SEC / 60
         tab["actual_kw"] = actual
         rows.append(tab)
         seqs.append(seq)
@@ -58,8 +58,8 @@ print("샘플 수:", len(df))
 # 3. 날짜 기준 분할 (train 70% / valid 15% / test 15%)
 #   - 무작위 분할 시 같은 날이 train, test에 섞여 성능이 과대평가됨
 dates = sorted(df["date"].unique())
-n_train = int(len(dates) * config.TRAIN_RATIO)
-n_valid = int(len(dates) * config.VALID_RATIO)
+n_train = int(len(dates) * TRAIN_RATIO)
+n_valid = int(len(dates) * VALID_RATIO)
 train_dates = dates[:n_train]
 valid_dates = dates[n_train:n_train + n_valid]
 
@@ -72,9 +72,9 @@ df["residual"] = df["actual_kw"] - df["proj_base"]
 
 # 5. 목표전력: train 15분 평균 상위 5%
 train_windows = df[df["split"] == "train"].drop_duplicates("window_start")["actual_kw"]
-target_kw = float(np.percentile(train_windows, config.TARGET_PCT))
+target_kw = float(np.percentile(train_windows, TARGET_PCT))
 df["is_peak"] = df["actual_kw"] >= target_kw
-config.write_log_print("목표전력 " + str(round(target_kw)) + " kW")
+write_log_print("목표전력 " + str(round(target_kw)) + " kW")
 
 # 분할별 기간, 피크 비율 확인
 split_info = {}
@@ -87,10 +87,10 @@ for split in ["train", "valid", "test"]:
         "samples": int(len(part)),
         "peak_ratio": float(part["is_peak"].mean()),
     }
-    config.write_log_print(split + " " + part["date"].min() + " ~ " + part["date"].max()
+    write_log_print(split + " " + part["date"].min() + " ~ " + part["date"].max()
                + " | 샘플 " + str(len(part)) + " | 피크 비율 " + str(round(part["is_peak"].mean() * 100, 1)) + "%")
     if part["is_peak"].mean() < 0.01:
-        config.write_log_print("  -> " + split + " 기간은 피크가 거의 없음 (크리스마스 연휴)")
+        write_log_print("  -> " + split + " 기간은 피크가 거의 없음 (크리스마스 연휴)")
 
 # 6. 분배 확인
 print()
@@ -108,16 +108,16 @@ print("합계 일치:", (df["split"].value_counts().sum() == len(df)))
 print()
 
 # 7. 저장 (분할별 폴더 + meta)
-run_stamp = config.stamp()
+run_stamp = stamp()
 
 for split in ["train", "valid", "test"]:
     mask = (df["split"] == split).to_numpy()
-    folder = config.SPLIT_DIRS[split]
+    folder = SPLIT_DIRS[split]
     os.makedirs(folder, exist_ok=True)
     df[mask].to_parquet(os.path.join(folder, split + "_" + run_stamp + ".parquet"), index=False)
     np.save(os.path.join(folder, split + "_seq_" + run_stamp + ".npy"), X_seq[mask])
 
-os.makedirs(config.PREP_DIR, exist_ok=True)
+os.makedirs(PREP_DIR, exist_ok=True)
 meta = {
     "stamp": run_stamp,
     "source": os.path.basename(source_path),
@@ -127,7 +127,7 @@ meta = {
     "n_samples": int(len(df)),
     "features": features.TAB_COLS,
 }
-with open(os.path.join(config.PREP_DIR, "meta_" + run_stamp + ".json"), "w", encoding="utf-8") as f:
+with open(os.path.join(PREP_DIR, "meta_" + run_stamp + ".json"), "w", encoding="utf-8") as f:
     json.dump(meta, f, ensure_ascii=False, indent=2)
 
-config.write_log_print("완료: Train/, Valid/, Test/ 에 {분할}_" + run_stamp + ".parquet, {분할}_seq_" + run_stamp + ".npy, 전처리/meta_" + run_stamp + ".json")
+write_log_print("완료: Train/, Valid/, Test/ 에 {분할}_" + run_stamp + ".parquet, {분할}_seq_" + run_stamp + ".npy, 전처리/meta_" + run_stamp + ".json")

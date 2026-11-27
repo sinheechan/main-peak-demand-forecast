@@ -12,9 +12,8 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+from config import *
 
-MACHINE_DIR = config.MACHINE_DIR
 
 # 1. 기기 목록
 machines = os.listdir(MACHINE_DIR)
@@ -38,7 +37,7 @@ steps = {}       # 기기별 10초 평균 P_kW (장비관계용)
 pattern = None
 
 for machine in tqdm(machines):
-    path = config.latest_file(os.path.join(MACHINE_DIR, machine), machine, "parquet")
+    path = latest_file(os.path.join(MACHINE_DIR, machine), machine, "parquet")
     
     if path is None:
         continue
@@ -47,7 +46,7 @@ for machine in tqdm(machines):
         df = pd.read_parquet(path)
 
         # 공통 값
-        local = df["ts_utc"].dt.tz_convert(config.LOCAL_TZ).dt.tz_localize(None)   # 현지 시각
+        local = df["ts_utc"].dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)   # 현지 시각
         gap = df["ts_utc"].diff().dt.total_seconds()   # 측정 간격 (초)
         power = df["P_kW"]
 
@@ -58,7 +57,7 @@ for machine in tqdm(machines):
             "시작 (현지)": local.min(),
             "끝 (현지)": local.max(),
             "간격 중앙값 (초)": gap.median(),
-            "1분 넘게 끊긴 곳": int((gap > config.GAP_SEC).sum()),
+            "1분 넘게 끊긴 곳": int((gap > GAP_SEC).sum()),
             "가장 긴 공백 (분)": gap.max() / 60,
             "P_kW 최소": power.min(),
             "P_kW 평균": power.mean(),
@@ -85,14 +84,14 @@ for machine in tqdm(machines):
 
             # IQR 기준: Q1 - k*IQR 미만 또는 Q3 + k*IQR 초과
             iqr = q3 - q1
-            lower = q1 - config.IQR_K * iqr
-            upper = q3 + config.IQR_K * iqr
+            lower = q1 - IQR_K * iqr
+            upper = q3 + IQR_K * iqr
             n_iqr = int(((s < lower) | (s > upper)).sum())
 
             # z-score 기준: |z| > Z_LIMIT
             n_z = 0
             if s.std() > 0:
-                n_z = int((((s - s.mean()) / s.std()).abs() > config.Z_LIMIT).sum())
+                n_z = int((((s - s.mean()) / s.std()).abs() > Z_LIMIT).sum())
 
             outliers.append({
                 "기기": machine, "컬럼": col, "IQR 하한": lower, "IQR 상한": upper,
@@ -101,7 +100,7 @@ for machine in tqdm(machines):
             })
 
         # 누락구간 (GAP_SEC 초과)
-        for i in np.where(gap > config.GAP_SEC)[0]:
+        for i in np.where(gap > GAP_SEC)[0]:
             gaps.append({
                 "기기": machine,
                 "끊기기 전 (현지)": local.iloc[i - 1],
@@ -116,21 +115,21 @@ for machine in tqdm(machines):
 
         # 장비관계용 10초 평균
         s = pd.Series(power.to_numpy(dtype="float64"), index=pd.DatetimeIndex(df["ts_utc"]))
-        steps[machine] = s.resample(str(config.STEP_SEC) + "s").mean()
+        steps[machine] = s.resample(str(STEP_SEC) + "s").mean()
 
         # 시간대패턴 (공장 전체, 요일 x 시간 평균)
-        if machine == config.MAIN_METER:
+        if machine == MAIN_METER:
             pattern = df.groupby([local.dt.dayofweek, local.dt.hour])["P_kW"].mean().unstack()
             pattern.index = pattern.index.map(lambda d: "월화수목금토일"[d])   # dayofweek 0=월
     
     except Exception as e:
-        config.write_log_print(f"오류 발생 : {e}")
+        write_log_print(f"오류 발생 : {e}")
 
 # 3. 장비관계 (공장 전체 대비 비중, 상관)
 relation = []
-main = steps[config.MAIN_METER]
+main = steps[MAIN_METER]
 for machine in steps:
-    if machine == config.MAIN_METER:
+    if machine == MAIN_METER:
         continue
     s = steps[machine].clip(lower=0)
     relation.append({
@@ -143,8 +142,8 @@ for machine in steps:
 relation = pd.DataFrame(relation).sort_values("공장 전체와 상관계수", ascending=False)
 
 # 4. 저장
-os.makedirs(config.REPORT_DIR, exist_ok=True)
-out_path = os.path.join(config.REPORT_DIR, "데이터분석_" + config.stamp() + ".xlsx")
+os.makedirs(REPORT_DIR, exist_ok=True)
+out_path = os.path.join(REPORT_DIR, "데이터분석_" + stamp() + ".xlsx")
 with pd.ExcelWriter(out_path) as writer:
     pd.DataFrame(summary).to_excel(writer, sheet_name="1_요약", index=False)
     pd.DataFrame(stats).to_excel(writer, sheet_name="2_기술통계", index=False)
@@ -155,4 +154,4 @@ with pd.ExcelWriter(out_path) as writer:
         pattern.rename_axis("요일 \\ 시").to_excel(writer, sheet_name="6_시간대패턴")
     relation.to_excel(writer, sheet_name="7_장비관계", index=False)
 
-config.write_log_print("완료: " + out_path)
+write_log_print("완료: " + out_path)

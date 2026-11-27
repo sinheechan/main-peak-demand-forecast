@@ -18,7 +18,7 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+from config import *
 from common.features import TAB_COLS
 from common.models import PAPERS, SEQ_MODELS, make_model, predict_ensemble, suggest_params
 
@@ -32,7 +32,7 @@ deploy = "--deploy" in sys.argv
 def evaluate(part, pred, target_kw):
     actual = part["actual_kw"].to_numpy()
     err = np.abs(pred - actual)
-    early = part["elapsed_min"].to_numpy() <= config.EARLY_MIN
+    early = part["elapsed_min"].to_numpy() <= EARLY_MIN
 
     frame = pd.DataFrame({
         "window_start": part["window_start"].to_numpy(),
@@ -72,7 +72,7 @@ def make_row(kind, name, scores):
 
 
 # 1. 전처리 결과 로드 (최신 meta와 같은 생성시간의 Train, Valid, Test)
-meta_path = config.latest_file(config.PREP_DIR, "meta", "json")
+meta_path = latest_file(PREP_DIR, "meta", "json")
 if meta_path is None:
     print("전처리 결과가 없음. 먼저 python 03_전처리_모델학습/preprocess.py")
     sys.exit()
@@ -84,7 +84,7 @@ target_kw = meta["target_kw"]
 parts = {}   # 분할별 DataFrame
 data = {}    # 분할별 (요약 특징, 시퀀스, 잔차)
 for split in ["train", "valid", "test"]:
-    folder = config.SPLIT_DIRS[split]
+    folder = SPLIT_DIRS[split]
     parts[split] = pd.read_parquet(os.path.join(folder, split + "_" + prep_stamp + ".parquet"))
     data[split] = (
         parts[split][TAB_COLS].to_numpy(dtype="float32"),
@@ -93,12 +93,12 @@ for split in ["train", "valid", "test"]:
     )
     print(split, "로드:", len(parts[split]), "샘플")
 
-run_id = config.stamp()
-run_dir = os.path.join(config.TRAIN_DIR, run_id)
+run_id = stamp()
+run_dir = os.path.join(TRAIN_DIR, run_id)
 os.makedirs(os.path.join(run_dir, "models"), exist_ok=True)
 
-config.write_log_print("=== 학습 시작 " + run_id + " (전처리 " + prep_stamp + ") ===")
-config.write_log_print("목표전력 " + str(round(target_kw)) + " kW")
+write_log_print("=== 학습 시작 " + run_id + " (전처리 " + prep_stamp + ") ===")
+write_log_print("목표전력 " + str(round(target_kw)) + " kW")
 
 rows = []         # 결과표
 preds = {}        # 모델별 valid, test 예측
@@ -112,23 +112,23 @@ for label, col in [("기준 계산식", "proj_base"), ("추세 계산식", "proj
         preds[label][split] = parts[split][col].to_numpy()
         scores[split] = evaluate(parts[split], preds[label][split], target_kw)
     rows.append(make_row("기준선", label, scores))
-    config.write_log_print(label + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
+    write_log_print(label + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
 
 # 3. 모델별 튜닝 및 학습
 X_tr, S_tr, y_tr = data["train"]
 X_va, S_va, y_va = data["valid"]
 
 # 튜닝용 샘플 (TUNE_ROWS개)
-rng = np.random.default_rng(config.SEED)
-pick = rng.choice(len(y_tr), min(config.TUNE_ROWS, len(y_tr)), replace=False)
+rng = np.random.default_rng(SEED)
+pick = rng.choice(len(y_tr), min(TUNE_ROWS, len(y_tr)), replace=False)
 
 models = {}
 valid_mae = {}
 
-for name in config.MODELS:
-    n_trials = config.TRIALS
+for name in MODELS:
+    n_trials = TRIALS
     if name in SEQ_MODELS:
-        n_trials = max(3, config.TRIALS // 3)   # 딥러닝은 시도 횟수 1/3
+        n_trials = max(3, TRIALS // 3)   # 딥러닝은 시도 횟수 1/3
 
     # Optuna: valid 잔차 MAE 최소화
     def objective(trial):
@@ -137,7 +137,7 @@ for name in config.MODELS:
         pred = model.predict(X_va, S_va)
         return float(np.mean(np.abs(pred - y_va)))
 
-    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=config.SEED))
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=SEED))
     pbar = tqdm(total=n_trials, desc=name)
     study.optimize(objective, n_trials=n_trials, callbacks=[lambda s, t: pbar.update(1)])
     pbar.close()
@@ -165,15 +165,15 @@ for name in config.MODELS:
     row = make_row("단일", name, scores)
     row["파라미터"] = json.dumps(best)
     rows.append(row)
-    config.write_log_print(name + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
+    write_log_print(name + " valid MAE " + str(round(scores["valid"]["MAE"], 1)) + " / test MAE " + str(round(scores["test"]["MAE"], 1)))
 
 # 4. 앙상블 선택
 #   - 2개 이상 모든 조합 x (단순 평균, 가중 평균) 중 valid MAE 최소
 #   - 가중 평균 가중치 = valid MAE의 역수
 ens_rows = []
 best_ens = None
-for n in range(2, len(config.MODELS) + 1):
-    for combo in combinations(config.MODELS, n):
+for n in range(2, len(MODELS) + 1):
+    for combo in combinations(MODELS, n):
         for method in ["단순 평균", "가중 평균"]:
             weights = []
             for m in combo:
@@ -206,7 +206,7 @@ weights = best_ens.pop("_weights")
 for row in ens_rows:
     row.pop("_members", None)
     row.pop("_weights", None)
-config.write_log_print("앙상블 선택: " + best_ens["모델"] + " (" + best_ens["방법"] + ") valid MAE "
+write_log_print("앙상블 선택: " + best_ens["모델"] + " (" + best_ens["방법"] + ") valid MAE "
            + str(round(best_ens["valid MAE"], 1)) + " / test MAE " + str(round(best_ens["test MAE"], 1)))
 
 # 서빙용 형식으로 저장
@@ -220,7 +220,7 @@ ens = {
     "scale": meta["scale"],
     "valid_mae": best_ens["valid MAE"],
     "test_mae": best_ens["test MAE"],
-    "replay_from": meta["split"][config.REPLAY_SPLIT]["start"],
+    "replay_from": meta["split"][REPLAY_SPLIT]["start"],
 }
 ens_path = os.path.join(run_dir, "ensemble_" + run_id + ".pkl")
 joblib.dump(ens, ens_path)
@@ -268,28 +268,28 @@ with pd.ExcelWriter(excel_path) as writer:
     pd.DataFrame(history).to_excel(writer, sheet_name="3_Optuna기록", index=False)
     pd.DataFrame(list(PAPERS.items()), columns=["모델", "논문"]).to_excel(writer, sheet_name="4_모델근거", index=False)
     ens_table.to_excel(writer, sheet_name="5_앙상블전체", index=False)
-config.write_log_print("저장: " + excel_path)
+write_log_print("저장: " + excel_path)
 
 # 6. 시뮬레이션 모델 교체 (--deploy)
 if deploy:
     # 기존 모델과 valid MAE 비교 후 개선 시에만 교체 (기존 모델은 백업)
     old_mae = None
-    if os.path.exists(config.SIM_MODEL_PATH):
+    if os.path.exists(SIM_MODEL_PATH):
         try:
-            old = joblib.load(config.SIM_MODEL_PATH)
+            old = joblib.load(SIM_MODEL_PATH)
             old_pred = predict_ensemble(old, parts["valid"], data["valid"][1])
             old_mae = float(np.mean(np.abs(old_pred - parts["valid"]["actual_kw"].to_numpy())))
         except Exception as e:
             print("기존 모델 비교 실패 -> 새 모델로 교체:", e)
 
     if old_mae is not None and ens["valid_mae"] > old_mae:
-        config.write_log_print("배포 안 함: 새 모델 valid " + str(round(ens["valid_mae"], 1)) + " > 기존 " + str(round(old_mae, 1)))
+        write_log_print("배포 안 함: 새 모델 valid " + str(round(ens["valid_mae"], 1)) + " > 기존 " + str(round(old_mae, 1)))
     else:
-        os.makedirs(os.path.dirname(config.SIM_MODEL_PATH), exist_ok=True)
-        if os.path.exists(config.SIM_MODEL_PATH):
-            backup = config.SIM_MODEL_PATH.replace("model.pkl", "model_backup_" + config.stamp() + ".pkl")
-            shutil.copy(config.SIM_MODEL_PATH, backup)
-        shutil.copy(ens_path, config.SIM_MODEL_PATH)
-        config.write_log_print("배포 완료 -> " + config.SIM_MODEL_PATH)
+        os.makedirs(os.path.dirname(SIM_MODEL_PATH), exist_ok=True)
+        if os.path.exists(SIM_MODEL_PATH):
+            backup = SIM_MODEL_PATH.replace("model.pkl", "model_backup_" + stamp() + ".pkl")
+            shutil.copy(SIM_MODEL_PATH, backup)
+        shutil.copy(ens_path, SIM_MODEL_PATH)
+        write_log_print("배포 완료 -> " + SIM_MODEL_PATH)
 else:
     print("시뮬레이션에 쓰려면 --deploy 붙여서 실행")

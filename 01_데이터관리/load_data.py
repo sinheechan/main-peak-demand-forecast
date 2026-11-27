@@ -12,18 +12,18 @@ import pandas as pd
 from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import config
+from config import *
 
 # 1. 원본 zip 찾기
-zip_list = glob.glob(os.path.join(config.RAW_DIR, "hipe_cleaned_*.zip"))
+zip_list = glob.glob(os.path.join(RAW_DIR, "hipe_cleaned_*.zip"))
 if len(zip_list) == 0:
-    print("zip 파일이 없음:", config.RAW_DIR)
+    print("zip 파일이 없음:", RAW_DIR)
     sys.exit()
 zip_path = zip_list[0]
 
 zip_file = zipfile.ZipFile(zip_path)
-run_stamp = config.stamp()
-config.write_log_print("zip: " + os.path.basename(zip_path))
+run_stamp = stamp()
+write_log_print("zip: " + os.path.basename(zip_path))
 
 info = []  # manifest 기록용
 
@@ -38,7 +38,7 @@ for file_name in tqdm(zip_list()):
     # 필요한 컬럼만 읽기 (2상 기기는 일부 컬럼이 없음)
     header = pd.read_csv(zip_file.open(file_name), nrows=0).columns
     cols = []
-    for col in config.KEEP_COLS:
+    for col in KEEP_COLS:
         if col in header:
             cols.append(col)
 
@@ -63,7 +63,7 @@ for file_name in tqdm(zip_list()):
     df = df[["ts_utc", "tz_offset"] + other_cols]
 
     # 저장 (parquet은 다음 단계 입력, csv는 확인용)
-    machine_path = os.path.join(config.MACHINE_DIR, machine)
+    machine_path = os.path.join(MACHINE_DIR, machine)
     os.makedirs(machine_path, exist_ok=True)
 
     parquet_path = os.path.join(machine_path, machine + "_" + run_stamp + ".parquet")
@@ -91,10 +91,10 @@ for file_name in tqdm(zip_list()):
         "parquet": parquet_path,
         "csv": csv_path,
     })
-    config.write_log_print(machine + " " + str(df.shape))
+    write_log_print(machine + " " + str(df.shape))
 
 # 3. 기기별 요약(manifest) 저장
 manifest = pd.DataFrame(info)
-manifest_path = os.path.join(config.MACHINE_DIR, "manifest_" + run_stamp + ".csv")
+manifest_path = os.path.join(MACHINE_DIR, "manifest_" + run_stamp + ".csv")
 manifest.to_csv(manifest_path, index=False, encoding="utf-8-sig")
-config.write_log_print("완료: 기기 " + str(len(info)) + "개 -> " + config.MACHINE_DIR)
+write_log_print("완료: 기기 " + str(len(info)) + "개 -> " + MACHINE_DIR)
