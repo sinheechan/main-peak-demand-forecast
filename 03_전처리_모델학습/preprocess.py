@@ -20,7 +20,7 @@ from common import features
 
 # 1. 공장 전체 전력 로드 (10초 평균)
 steps, scale, source_path = features.load_main_steps()
-config.log("10초 칸 " + str(len(steps)) + "개, 빈 칸 " + str(round(steps.isna().mean() * 100, 2)) + "%, 배율 x" + str(round(scale, 2)))
+config.write_log_print("10초 칸 " + str(len(steps)) + "개, 빈 칸 " + str(round(steps.isna().mean() * 100, 2)) + "%, 배율 x" + str(round(scale, 2)))
 
 # 2. 샘플 생성 (15분 구간별, 2~14분 시점 1분 간격)
 values = steps.to_numpy(dtype="float64")
@@ -74,7 +74,7 @@ df["residual"] = df["actual_kw"] - df["proj_base"]
 train_windows = df[df["split"] == "train"].drop_duplicates("window_start")["actual_kw"]
 target_kw = float(np.percentile(train_windows, config.TARGET_PCT))
 df["is_peak"] = df["actual_kw"] >= target_kw
-config.log("목표전력 " + str(round(target_kw)) + " kW")
+config.write_log_print("목표전력 " + str(round(target_kw)) + " kW")
 
 # 분할별 기간, 피크 비율 확인
 split_info = {}
@@ -87,10 +87,10 @@ for split in ["train", "valid", "test"]:
         "samples": int(len(part)),
         "peak_ratio": float(part["is_peak"].mean()),
     }
-    config.log(split + " " + part["date"].min() + " ~ " + part["date"].max()
+    config.write_log_print(split + " " + part["date"].min() + " ~ " + part["date"].max()
                + " | 샘플 " + str(len(part)) + " | 피크 비율 " + str(round(part["is_peak"].mean() * 100, 1)) + "%")
     if part["is_peak"].mean() < 0.01:
-        config.log("  -> " + split + " 기간은 피크가 거의 없음 (크리스마스 연휴)")
+        config.write_log_print("  -> " + split + " 기간은 피크가 거의 없음 (크리스마스 연휴)")
 
 # 6. 분배 확인
 print()
@@ -130,4 +130,4 @@ meta = {
 with open(os.path.join(config.PREP_DIR, "meta_" + run_stamp + ".json"), "w", encoding="utf-8") as f:
     json.dump(meta, f, ensure_ascii=False, indent=2)
 
-config.log("완료: Train/, Valid/, Test/ 에 {분할}_" + run_stamp + ".parquet, {분할}_seq_" + run_stamp + ".npy, 전처리/meta_" + run_stamp + ".json")
+config.write_log_print("완료: Train/, Valid/, Test/ 에 {분할}_" + run_stamp + ".parquet, {분할}_seq_" + run_stamp + ".npy, 전처리/meta_" + run_stamp + ".json")

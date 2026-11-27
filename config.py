@@ -73,7 +73,7 @@ def latest_file(folder, name, ext):
 
 
 # 콘솔 출력 + 로그 파일 기록
-def log(msg):
+def write_log_print(msg):
     line = datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " | " + str(msg)
     print(line)
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
