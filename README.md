@@ -1,91 +1,153 @@
-# peak-demand-forecast
+# main-peak-demand-forecast
 
-공장 전체 전력(HIPE, 독일 전자부품 공장)의 **15분 평균 전력(최대수요전력)** 을 구간이 끝나기 전에 예측하고,
-가상 계측기 · 제어기 · 서버로 실시간 운영을 시뮬레이션하는 프로젝트.
+공장 전력 피크 제어 시스템 (전력 수집·적재 자동화 + AI 피크 예측)
 
-## 폴더 구성
+<br/>
+
+<img src="image/dashboard.png">
+
+<br/><br/>
+
+## Object
+
+<br/>
+
+- 15분 평균 전력(최대수요전력)이 기본요금을 결정함
+- 구간 종료 전 15분 평균을 예측해 ESS 방전·부하 차단으로 피크 억제
+- 공개 데이터 KIT HIPE를 가상 계측기(Modbus)로 1초마다 재생
+- 기존 계산식에 ML 앙상블로 오차를 보정하는 방식
+
+<br/><br/>
+
+## Content
+
+<br/>
+
+1. 시스템 구성
+
+2. 결과
+
+3. 폴더 구성
+
+4. 실행 방법
+
+5. 모델
+
+<br/><br/>
+
+## 1. 시스템 구성
+
+<br/>
+
+<img src="image/architecture_result.png">
+
+<br/>
+
+- 엣지 : 15분 예상 수요 계산 후 ESS·부하 제어
+  - 목표 90% 이상 ESS 방전, 목표 이상 부하 차단, 80% 미만 복귀
+  - MQTT 끊김 시 SQLite에 저장 후 재전송
+- 서버 : MQTT 수신 → 데이터 검사 → PostgreSQL 적재
+  - 검사 : 중복, 수신 지연, 전압·주파수·역률 이탈, 전력량 역행
+- 대시보드 : Streamlit, 5초마다 갱신
+- ML 서빙 : 30초마다 예측 기록, 구간 종료 후 계산식과 비교
+- 이상 상황 재현 : `scenario.py peak` (+450kW, 8분) / `sag` (-13%, 1분)
+
+<br/><br/>
+
+## 2. 결과
+
+<br/>
+
+| 항목 | 기존 계산식 | 앙상블 보정 | 변화 |
+|---|---|---|---|
+| 15분 평균 예측 오차 | 51.2 kW | 32.2 kW | 37% 감소 |
+| 구간 초반 오차 (8분까지) | 80.4 kW | 47.1 kW | 41% 감소 |
+| 불필요한 경보 | 20건 | 9건 | 55% 감소 |
+| 놓친 피크 | 1건 | 1건 | 57건 중 56건 감지 |
+| 시험 기간 예측 오차 | 47.7 kW | 27.1 kW | 43% 감소 |
+
+<br/>
+
+- valid 기간 기준 (마지막 줄만 test 기간)
+- 경보는 절반 이하로 감소, 놓친 피크 수는 그대로
+- test 기간(12월 말)은 연휴라 피크가 거의 없어 valid 기준 사용
+
+<br/><br/>
+
+## 3. 폴더 구성
+
+<br/>
 
 ```
-Edge-PDP/
-├── config.py                  모든 경로 · 숫자 설정 · 최신 파일 찾기 · 로그 (여기만 고치면 전체 반영)
-├── common/                    여러 단계가 같이 쓰는 코드
-│   ├── features.py            10초 평균 · 15분 구간 특징 (학습과 서빙이 같은 함수 사용)
-│   └── models.py              모델 6종 · Optuna 탐색 범위 · 논문 근거
-├── 01_데이터관리/
-│   ├── load_data.py           HIPE zip → 기기별 폴더에 parquet + csv 저장
-│   └── raw/                   ← HIPE zip 을 여기에 (아래 '데이터 준비' 링크)
-├── 02_데이터분석/
-│   ├── analyze_data.py        기기별 요약 · 통계 · 이상치 · 누락 · 패턴 → 엑셀 1개
-│   └── notebooks/             탐색용 노트북
-├── 03_전처리_모델학습/
-│   ├── preprocess.py          특징 생성 · 날짜 기준 train/valid/test 분할
-│   └── train.py               모델 6개를 하나씩 Optuna 튜닝 · 학습 → valid/test 결과 · 앙상블
-├── output/                    01 ~ 03 단계 산출물 전부
-│   ├── machines/<기기명>/<기기명>_<생성시간>.parquet (.csv)
-│   ├── reports/데이터분석_<생성시간>.xlsx
-│   ├── Train/ · Valid/ · Test/  <분할>_<생성시간>.parquet, <분할>_seq_<생성시간>.npy
-│   ├── 전처리/meta_<생성시간>.json
-│   ├── 학습결과/<run_id>/학습결과_<run_id>.xlsx, models/, ensemble_<run_id>.pkl
-│   └── logs/peak_demand.log   모든 단계 실행 로그
-├── 04_시뮬레이션/
-│   ├── run.sh                 서버 → 계측기 → 제어기 → ML 서빙 한 번에 실행
-│   ├── model/model.pkl        서빙이 쓰는 모델 (train.py --deploy 로 들어옴)
-│   ├── edge/                  가상 계측기(Modbus) · HIPE 재생 · 15분 수요 제어 · MQTT 전송
-│   ├── serving/serve.py       ML 그림자 운영 (예측 기록 · 구간 평가)
-│   └── server/                docker-compose (MQTT 브로커 · PostgreSQL · 수신기 · 대시보드)
-└── requirements.txt
+main-peak-demand-forecast/
+├── config.py              전체 경로 · 설정값 · 로그
+├── run_all.py             01 ~ 03 단계 순서대로 실행
+├── common/                학습·서빙 공용 특징 · 모델 정의
+├── 01_데이터관리/          HIPE zip → 기기별 parquet
+├── 02_데이터분석/          통계 · 이상치 · 누락 → 엑셀
+├── 03_전처리_모델학습/     특징 생성 · 분할 · 학습 · 앙상블
+├── output/                01 ~ 03 단계 산출물 · 로그
+└── 04_시뮬레이션/          계측기 · 제어기 · 서빙 · 서버(docker-compose)
 ```
 
-**파일명 규칙**: `<이름>_<생성시간>.<확장자>` (예: `MainTerminal_20261122_170616.parquet`).
-다음 단계는 같은 이름 중 생성시간이 가장 늦은 파일을 자동으로 읽는다 (`config.latest_file`).
+- 파일명 `<이름>_<생성시간>`, 다음 단계는 최신 파일을 자동으로 읽음
 
-## 데이터 준비
+<br/><br/>
 
-원본 데이터(약 1.3 GB)는 저장소에 포함하지 않는다. 아래에서 받아 `01_데이터관리/raw/` 에 넣는다 (압축은 풀지 않음).
+## 4. 실행 방법
 
-- 데이터셋: HIPE – High-resolution Industrial Production Energy (KIT) — https://www.energystatusdata.kit.edu/hipe.php
-- 사용 파일 (3개월, 2017-10-01 ~ 2017-12-31): [hipe_cleaned_v1.0.1_geq_2017-10-01_lt_2018-01-01.zip](https://bwsyncandshare.kit.edu/s/JacGftzBH85dgGK/download?path=%2F&files=hipe_cleaned_v1.0.1_geq_2017-10-01_lt_2018-01-01.zip)
-- 같은 페이지의 1주 파일(2017-10-23 ~ 10-30)은 위 기간에 포함된 샘플이라 사용하지 않는다
+<br/>
 
-## 실행 순서
+- 데이터셋 : [HIPE (KIT)](https://www.energystatusdata.kit.edu/hipe.php), 원본 약 1.3 GB라 저장소 미포함
+- [HIPE 3개월분 zip](https://bwsyncandshare.kit.edu/s/JacGftzBH85dgGK/download?path=%2F&files=hipe_cleaned_v1.0.1_geq_2017-10-01_lt_2018-01-01.zip) 을 압축 해제 없이 `01_데이터관리/raw/` 에 저장
+- 각 폴더의 `.env.example` 을 `.env` 로 복사 후 작성
+
+<br/>
 
 ```bash
-source .venv/bin/activate
-python 01_데이터관리/load_data.py                 # 1. zip → 기기별 parquet
-python 02_데이터분석/analyze_data.py              # 2. 분석 엑셀
-python 03_전처리_모델학습/preprocess.py           # 3-1. 특징 · 분할
-python 03_전처리_모델학습/train.py --deploy       # 3-2. 학습 · 평가 · 시뮬레이션 모델 반영
-./04_시뮬레이션/run.sh                            # 4. 시뮬레이션 (stop 으로 종료)
+pip install -r requirements.txt
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+python run_all.py              # 01 ~ 03 단계 (중간부터 : run_all.py 3)
+./04_시뮬레이션/run.sh          # 시뮬레이션 (종료 : run.sh stop)
 ```
 
-빠르게 확인할 때: `config.py` 의 `MODELS`, `TRIALS` 를 줄여서 실행
+- 대시보드 : http://localhost:8501
 
-## 단계별 산출물
+<br/><br/>
 
-| 단계 | 산출물 | 내용 |
-|---|---|---|
-| 1 | `machines/<기기>/…parquet`, `….csv`, `manifest_….csv` | 필요한 컬럼만, 시각은 UTC, 중복 시각 제거 |
-| 2 | `데이터분석_….xlsx` | 요약 · 기술통계 · 이상치 · 누락구간 · 일별수집률 · 시간대패턴 · 장비관계 |
-| 3 | `학습결과_….xlsx` | 요약(개선율) · 전체결과(valid/test) · 경과시간별 MAE · Optuna 기록 · 모델 근거 · 앙상블 전체 |
-| 4 | DB `ml.forecast`, `ml.window_eval` | 같은 구간에서 기준 계산식 vs ML 오차 |
+## 5. 모델
 
-## 모델 (common/models.py)
+<br/>
 
-학습 타깃은 **잔차 = 실제 15분 평균 − 기준 계산식**. 최종 예측 = 기준 계산식 + 예측 잔차.
+- 학습 대상 : 실제 15분 평균 - 기준 계산식 (잔차)
+- 최종 예측 : 기준 계산식 + 예측 잔차
+
+<br/>
 
 | 모델 | 근거 논문 |
 |---|---|
-| Ridge | Hoerl & Kennard (1970), Technometrics |
-| Random Forest | Breiman (2001), Machine Learning |
-| XGBoost | Chen & Guestrin (2016), KDD |
-| LightGBM | Ke et al. (2017), NeurIPS |
-| GRU | Cho et al. (2014), EMNLP |
-| 1D-CNN | Bai, Kolter & Koltun (2018), arXiv:1803.01271 |
-| Optuna (TPE) | Akiba et al. (2019), KDD · Bergstra et al. (2011), NeurIPS |
-| 가중 평균 앙상블 | Bates & Granger (1969), Operational Research Quarterly |
+| Ridge | Hoerl & Kennard (1970) |
+| Random Forest | Breiman (2001) |
+| XGBoost | Chen & Guestrin (2016) |
+| LightGBM | Ke et al. (2017) |
+| GRU | Cho et al. (2014) |
+| 1D-CNN | Bai, Kolter & Koltun (2018) |
+| Optuna (TPE) | Akiba et al. (2019) |
+| 가중 평균 앙상블 | Bates & Granger (1969) |
 
-## 참고
+<br/>
 
-- 분할은 현지 날짜 기준 70 / 15 / 15. HIPE 시험 기간(12월 말)은 크리스마스 연휴라 피크가 거의 없어,
-  피크 지표는 valid 를 함께 본다. 시뮬레이션도 valid 기간부터 재생한다 (`config.REPLAY_SPLIT`).
-- 비밀번호는 각 폴더의 `.env` (예시는 `.env.example`).
+- 트리·선형 : 경과율, 누적 사용량, 최근 평균·기울기 등 요약 특징
+- GRU·1D-CNN : 최근 10분 시퀀스 (10초 평균 60칸)
+- 예측 시점 : 구간 2분 후 ~ 14분, 1분 간격
+- 분할 : 현지 날짜 기준 70 / 15 / 15
+
+<br/><br/>
+
+## Feedback
+
+<br/>
+
+- 공개 데이터 재생이라 실제 통신 지연은 시나리오로만 재현
+- 현재 ML 예측은 기록·비교만 하는 그림자 운영
+- 다음 단계 : ML 예측을 제어 판단에 반영
