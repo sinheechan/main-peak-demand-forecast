@@ -1,6 +1,6 @@
 # HIPE 원본 zip을 기기별 파일로 나눠 저장
 #   입력: 01_데이터관리/raw/hipe_cleaned_*.zip
-#   출력: 01_데이터관리/machines/{기기}/{기기}_{생성시간}.parquet, .csv
+#   출력: output/machines/{기기}/{기기}_{생성시간}.parquet, .csv
 #   실행: python 01_데이터관리/load_data.py
 
 import glob
@@ -11,7 +11,7 @@ import zipfile
 import pandas as pd
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import *
 
 # 1. 원본 zip 찾기
@@ -29,8 +29,8 @@ info = []  # manifest 기록용
 
 # 2. 기기별로 읽어서 저장
 
-zip_list = zip_file.namelist()
-for file_name in tqdm(zip_list()):
+file_list = zip_file.namelist()
+for file_name in tqdm(file_list):
     if not file_name.endswith(".csv"):
         continue
     machine = file_name.split("_")[0]  # 예: ChipPress_PhaseCount_3_... -> ChipPress

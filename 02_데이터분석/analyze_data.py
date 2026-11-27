@@ -1,6 +1,6 @@
 # 기기별 데이터 분석 결과를 엑셀 1개로 저장
-#   입력: 01_데이터관리/machines/{기기}/ 최신 parquet
-#   출력: 02_데이터분석/reports/데이터분석_{생성시간}.xlsx
+#   입력: output/machines/{기기}/ 최신 parquet
+#   출력: output/reports/데이터분석_{생성시간}.xlsx
 #   실행: python 02_데이터분석/analyze_data.py
 #   시트: 요약, 기술통계, 이상치, 누락구간, 일별수집률, 시간대패턴, 장비관계
 
@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import *
 
 

@@ -13,26 +13,26 @@ Edge-PDP/
 │   └── models.py              모델 6종 · Optuna 탐색 범위 · 논문 근거
 ├── 01_데이터관리/
 │   ├── load_data.py           HIPE zip → 기기별 폴더에 parquet + csv 저장
-│   ├── raw/                   ← HIPE zip 을 여기에 (아래 '데이터 준비' 링크)
-│   └── machines/<기기명>/<기기명>_<생성시간>.parquet (.csv)
+│   └── raw/                   ← HIPE zip 을 여기에 (아래 '데이터 준비' 링크)
 ├── 02_데이터분석/
 │   ├── analyze_data.py        기기별 요약 · 통계 · 이상치 · 누락 · 패턴 → 엑셀 1개
-│   ├── reports/데이터분석_<생성시간>.xlsx
 │   └── notebooks/             탐색용 노트북
 ├── 03_전처리_모델학습/
 │   ├── preprocess.py          특징 생성 · 날짜 기준 train/valid/test 분할
-│   ├── train.py               모델 6개를 하나씩 Optuna 튜닝 · 학습 → valid/test 결과 · 앙상블
-│   └── outputs/
-│       ├── Train/ · Valid/ · Test/  <분할>_<생성시간>.parquet, <분할>_seq_<생성시간>.npy
-│       ├── 전처리/meta_<생성시간>.json
-│       └── 학습결과/<run_id>/학습결과_<run_id>.xlsx, models/, ensemble_<run_id>.pkl
+│   └── train.py               모델 6개를 하나씩 Optuna 튜닝 · 학습 → valid/test 결과 · 앙상블
+├── output/                    01 ~ 03 단계 산출물 전부
+│   ├── machines/<기기명>/<기기명>_<생성시간>.parquet (.csv)
+│   ├── reports/데이터분석_<생성시간>.xlsx
+│   ├── Train/ · Valid/ · Test/  <분할>_<생성시간>.parquet, <분할>_seq_<생성시간>.npy
+│   ├── 전처리/meta_<생성시간>.json
+│   ├── 학습결과/<run_id>/학습결과_<run_id>.xlsx, models/, ensemble_<run_id>.pkl
+│   └── logs/peak_demand.log   모든 단계 실행 로그
 ├── 04_시뮬레이션/
 │   ├── run.sh                 서버 → 계측기 → 제어기 → ML 서빙 한 번에 실행
 │   ├── model/model.pkl        서빙이 쓰는 모델 (train.py --deploy 로 들어옴)
 │   ├── edge/                  가상 계측기(Modbus) · HIPE 재생 · 15분 수요 제어 · MQTT 전송
 │   ├── serving/serve.py       ML 그림자 운영 (예측 기록 · 구간 평가)
 │   └── server/                docker-compose (MQTT 브로커 · PostgreSQL · 수신기 · 대시보드)
-├── logs/peak_demand.log       모든 단계 실행 로그
 └── requirements.txt
 ```
 

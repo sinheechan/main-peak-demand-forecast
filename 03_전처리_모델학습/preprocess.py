@@ -1,6 +1,6 @@
 # 학습 샘플 생성 및 날짜 기준 train / valid / test 분할
-#   입력: 01_데이터관리/machines/MainTerminal/ 최신 parquet
-#   출력: 03_전처리_모델학습/outputs/
+#   입력: output/machines/MainTerminal/ 최신 parquet
+#   출력: output/ (전처리/, Train/, Valid/, Test/)
 #         Train/, Valid/, Test/   {분할}_{생성시간}.parquet  예측 시점별 특징, 정답
 #                                 {분할}_seq_{생성시간}.npy  최근 10분 시퀀스 (딥러닝 입력)
 #         전처리/meta_{생성시간}.json   배율, 목표전력, 분할 기간
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import *
 from common import features
 
@@ -26,6 +26,7 @@ write_log_print(f"10초 칸 {len(steps)}개, 빈 칸 {steps.isna().mean() * 100:
 values = steps.to_numpy(dtype="float64")
 first = steps.index[0].ceil("15min")
 last = steps.index[-1].floor("15min") - pd.Timedelta(minutes=15)
+
 window_list = pd.date_range(first, last, freq="15min")
 
 rows = []
@@ -37,6 +38,7 @@ for ws in tqdm(window_list):
     # 90칸이 모두 있는 구간만 사용 (정답 계산 가능)
     if len(window) < WINDOW or np.isnan(window).any():
         continue
+
     actual = float(window.mean())
 
     for k in range(FIRST, LAST + 1, EVERY):

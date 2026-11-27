@@ -9,17 +9,19 @@ from datetime import datetime
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 RAW_DIR = os.path.join(ROOT, "01_데이터관리", "raw")             # 원본 zip
-MACHINE_DIR = os.path.join(ROOT, "01_데이터관리", "machines")    # 기기별 parquet, csv
-REPORT_DIR = os.path.join(ROOT, "02_데이터분석", "reports")      # 분석 엑셀
-PREP_DIR = os.path.join(ROOT, "03_전처리_모델학습", "outputs", "전처리")    # meta
-SPLIT_DIRS = {                                                              # 분할별 샘플
-    "train": os.path.join(ROOT, "03_전처리_모델학습", "outputs", "Train"),
-    "valid": os.path.join(ROOT, "03_전처리_모델학습", "outputs", "Valid"),
-    "test": os.path.join(ROOT, "03_전처리_모델학습", "outputs", "Test"),
+OUTPUT_DIR = os.path.join(ROOT, "output")                       # 모든 산출물
+
+MACHINE_DIR = os.path.join(OUTPUT_DIR, "machines")    # 기기별 parquet, csv
+REPORT_DIR = os.path.join(OUTPUT_DIR, "reports")      # 분석 엑셀
+PREP_DIR = os.path.join(OUTPUT_DIR, "전처리")          # meta
+SPLIT_DIRS = {                                        # 분할별 샘플
+    "train": os.path.join(OUTPUT_DIR, "Train"),
+    "valid": os.path.join(OUTPUT_DIR, "Valid"),
+    "test": os.path.join(OUTPUT_DIR, "Test"),
 }
-TRAIN_DIR = os.path.join(ROOT, "03_전처리_모델학습", "outputs", "학습결과")
+TRAIN_DIR = os.path.join(OUTPUT_DIR, "학습결과")
 SIM_MODEL_PATH = os.path.join(ROOT, "04_시뮬레이션", "model", "model.pkl")   # 시뮬레이션 사용 모델
-LOG_PATH = os.path.join(ROOT, "logs", "peak_demand.log")
+LOG_PATH = os.path.join(OUTPUT_DIR, "logs", "peak_demand.log")
 
 # 데이터
 MAIN_METER = "MainTerminal"     # 공장 전체 미터 (예측 대상)

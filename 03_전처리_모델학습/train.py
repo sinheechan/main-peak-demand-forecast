@@ -1,6 +1,6 @@
 # 모델 튜닝·학습·평가 및 앙상블 선택
-#   입력: 03_전처리_모델학습/outputs/전처리/ 최신 meta, 같은 생성시간의 Train/, Valid/, Test/ 데이터
-#   출력: 03_전처리_모델학습/outputs/학습결과/{생성시간}/
+#   입력: output/전처리/ 최신 meta, 같은 생성시간의 Train/, Valid/, Test/ 데이터
+#   출력: output/학습결과/{생성시간}/
 #         학습결과_{생성시간}.xlsx, models/{모델}_{생성시간}.pkl, ensemble_{생성시간}.pkl
 #   실행: python 03_전처리_모델학습/train.py
 #         python 03_전처리_모델학습/train.py --deploy   (기존보다 좋으면 시뮬레이션 모델 교체)
@@ -17,7 +17,7 @@ import optuna
 import pandas as pd
 from tqdm import tqdm
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import *
 from common.features import TAB_COLS
 from common.models import PAPERS, SEQ_MODELS, make_model, predict_ensemble, suggest_params

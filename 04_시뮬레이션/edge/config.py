@@ -1,6 +1,6 @@
 # 엣지 공통 설정 (simulator, controller, scenario 공용)
 #   - 비밀번호는 .env, 나머지는 이 파일에서 관리
-#   - 재생 데이터: 01_데이터관리/machines/MainTerminal/ 최신 parquet
+#   - 재생 데이터: output/machines/MainTerminal/ 최신 parquet
 #   - 재생 시작일: 03 전처리 meta의 REPLAY_SPLIT 시작일 (학습에 안 쓴 기간)
 
 import glob
@@ -58,12 +58,12 @@ def latest(folder, name, ext):
 
 
 def replay_path():
-    return latest(ROOT / "01_데이터관리" / "machines" / MAIN_METER, MAIN_METER, "parquet")
+    return latest(ROOT / "output" / "machines" / MAIN_METER, MAIN_METER, "parquet")
 
 
 def replay_from():
     # 재생 시작일 (meta 없으면 None -> 전체 재생)
-    meta_path = latest(ROOT / "03_전처리_모델학습" / "outputs" / "전처리", "meta", "json")
+    meta_path = latest(ROOT / "output" / "전처리", "meta", "json")
     if meta_path is None:
         return None
     with open(meta_path, encoding="utf-8") as f:
